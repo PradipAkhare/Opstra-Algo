@@ -104,7 +104,6 @@ def calc_leg_pnl(S, K, entry_price, inst_type, side, T_days, is_t0=False):
     else:
         if is_t0 and T_days > 0: current_val = bs_price(S, K, T_days, inst_type)
         else: current_val = max(0, S - K) if inst_type == "CE" else max(0, K - S)
-    
     return (current_val - entry_price) if side == "BUY" else (entry_price - current_val)
 
 def get_greeks(S, K, T_days, inst_type, side):
@@ -137,12 +136,19 @@ def check_exit(live_price, side, sl_price, tgt_price):
 # ==========================================
 st.sidebar.header("⚙️ Algo Settings")
 strategy = st.sidebar.selectbox("📈 Select Strategy", [
-    "Short Straddle (Sell CE + Sell PE)", 
+    "Short Straddle (Naked Sell ⚠️)", 
+    "Iron Butterfly (Hedged Straddle 🛡️)", 
     "Bullish Hedge (Long FUT + Buy PE)", 
     "Bearish Hedge (Short FUT + Buy CE)"
 ])
 
-target_strike = st.sidebar.number_input("Strike Price (For Options)", value=25000, step=50)
+target_strike = st.sidebar.number_input("Center Strike Price", value=25000, step=50)
+
+# Iron Butterfly ke liye extra Hedge Slider
+hedge_dist = 0
+if "Butterfly" in strategy:
+    hedge_dist = st.sidebar.number_input("Hedge OTM Distance (Buy Options)", value=500, step=50, help="Kitne points door ka option buy karna hai loss kam karne ke liye.")
+
 target_expiry = st.sidebar.text_input("Expiry Date", value="29DEC2026")
 lot_size = st.sidebar.number_input("Lot Size", value=25)
 days_to_expiry = st.sidebar.number_input("Days to Expiry", value=3)
@@ -160,50 +166,63 @@ leg_target_percent = st.sidebar.number_input("Individual Leg Target (%)", 10, 10
 
 start_algo = st.sidebar.button("▶️ START LIVE ALGO")
 
-# Strategy Configuration
-if "Straddle" in strategy:
-    leg1_type, leg1_side = "CE", "SELL"
-    leg2_type, leg2_side = "PE", "SELL"
+# ==========================================
+# 5. DYNAMIC LEGS CONFIGURATION
+# ==========================================
+if "Butterfly" in strategy:
+    # 4 Legs (Sell ATM, Buy OTM for protection)
+    legs_config = [("CE", "SELL", 0), ("PE", "SELL", 0), ("CE", "BUY", hedge_dist), ("PE", "BUY", -hedge_dist)]
+    est_margin = (lot_size/25) * 55000 
+elif "Straddle" in strategy:
+    legs_config = [("CE", "SELL", 0), ("PE", "SELL", 0)]
+    est_margin = (lot_size/25) * 130000
 elif "Bullish" in strategy:
-    leg1_type, leg1_side = "FUT", "BUY"
-    leg2_type, leg2_side = "PE", "BUY"
+    legs_config = [("FUT", "BUY", 0), ("PE", "BUY", 0)]
+    est_margin = (lot_size/25) * 45000
 else:
-    leg1_type, leg1_side = "FUT", "SELL"
-    leg2_type, leg2_side = "CE", "BUY"
+    legs_config = [("FUT", "SELL", 0), ("CE", "BUY", 0)]
+    est_margin = (lot_size/25) * 45000
 
 # ==========================================
-# 5. MAIN DASHBOARD LOGIC (ANALYSIS & ALGO)
+# 6. MAIN DASHBOARD LOGIC 
 # ==========================================
-leg1_token, leg1_symbol = get_token_info("NIFTY", target_strike, leg1_type, target_expiry)
-leg2_token, leg2_symbol = get_token_info("NIFTY", target_strike, leg2_type, target_expiry)
+leg_data = []
+all_tokens_found = True
 
-if leg1_token and leg2_token:
+for l_type, l_side, l_off in legs_config:
+    l_strike = target_strike + l_off
+    tok, sym = get_token_info("NIFTY", l_strike, l_type, target_expiry)
+    if tok:
+        leg_data.append({"type": l_type, "side": l_side, "strike": l_strike, "token": tok, "symbol": sym, "active": True})
+    else:
+        all_tokens_found = False
+
+if all_tokens_found:
     
-# --- PART 1: PRE-TRADE ANALYSIS ---
-    entry1 = smartApi.ltpData("NFO", leg1_symbol, leg1_token)['data']['ltp']
-    entry2 = smartApi.ltpData("NFO", leg2_symbol, leg2_token)['data']['ltp']
-    current_spot = target_strike # Approximation for center point
-    
-    # Graph range thoda bada kar diya (4000 points) taaki unlimited profit clear dikhe
+    # --- PART 1: PRE-TRADE ANALYSIS ---
+    for leg in leg_data:
+        leg["entry"] = smartApi.ltpData("NFO", leg["symbol"], leg["token"])['data']['ltp']
+        leg["sl"], leg["tgt"] = get_exit_prices(leg["entry"], leg["side"], leg_sl_percent, leg_target_percent)
+        
+    current_spot = target_strike 
     prices = list(range(int(target_strike) - 4000, int(target_strike) + 4000, 10))
     pnl_expiry = []
     pnl_t0 = []
     
     for p in prices:
-        pnl1_exp = calc_leg_pnl(p, target_strike, entry1, leg1_type, leg1_side, 0, False)
-        pnl2_exp = calc_leg_pnl(p, target_strike, entry2, leg2_type, leg2_side, 0, False)
-        pnl_expiry.append((pnl1_exp + pnl2_exp) * lot_size)
-        
-        pnl1_t0 = calc_leg_pnl(p, target_strike, entry1, leg1_type, leg1_side, days_to_expiry, True)
-        pnl2_t0 = calc_leg_pnl(p, target_strike, entry2, leg2_type, leg2_side, days_to_expiry, True)
-        pnl_t0.append((pnl1_t0 + pnl2_t0) * lot_size)
+        exp_val = 0
+        t0_val = 0
+        for leg in leg_data:
+            exp_val += calc_leg_pnl(p, leg["strike"], leg["entry"], leg["type"], leg["side"], 0, False)
+            t0_val += calc_leg_pnl(p, leg["strike"], leg["entry"], leg["type"], leg["side"], days_to_expiry, True)
+        pnl_expiry.append(exp_val * lot_size)
+        pnl_t0.append(t0_val * lot_size)
         
     st.subheader(f"📊 Pre-Trade Analysis: {strategy}")
     
     max_p = max(pnl_expiry)
     max_l = min(pnl_expiry)
     
-    # 👇 SMART UNLIMITED CHECK (Graph ke ends check karega) 👇
     right_diff = pnl_expiry[-1] - pnl_expiry[-2]
     left_diff = pnl_expiry[0] - pnl_expiry[1]
     
@@ -211,7 +230,6 @@ if leg1_token and leg2_token:
     max_loss_str = "Unlimited ⚠️" if (right_diff < -1 or left_diff < -1) else f"₹ {round(max_l, 2)}"
     
     pop_value = calculate_dynamic_pop(prices, pnl_t0, current_spot, days_to_expiry)
-    est_margin = (lot_size/25) * 130000 if "Straddle" in strategy else (lot_size/25) * 45000
     
     m_col1, m_col2, m_col3, m_col4 = st.columns(4)
     m_col1.metric("Est. Margin Required", f"₹ {est_margin:,.0f}")
@@ -237,131 +255,127 @@ if leg1_token and leg2_token:
         st.markdown("---")
         st.subheader("⚡ Live MTM & Strategy Greeks")
         
-        col1, col2, col3 = st.columns(3)
-        leg1_metric = col1.empty() 
-        leg2_metric = col2.empty()
-        pnl_metric = col3.empty()
+        # Dynamic Columns for Legs (2 or 4)
+        cols = st.columns(len(leg_data))
+        leg_metrics = [cols[i].empty() for i in range(len(leg_data))]
         
-        g_col1, g_col2, g_col3 = st.columns(3)
-        delta_metric = g_col1.empty()
-        theta_metric = g_col2.empty()
-        vega_metric = g_col3.empty()
-        
+        st.markdown("<br>", unsafe_allow_html=True)
+        g_col1, g_col2, g_col3, g_col4 = st.columns(4)
+        pnl_metric = g_col1.empty()
+        delta_metric = g_col2.empty()
+        theta_metric = g_col3.empty()
+        vega_metric = g_col4.empty()
         status_msg = st.empty()
         
-        leg1_sl_price, leg1_tgt_price = get_exit_prices(entry1, leg1_side, leg_sl_percent, leg_target_percent)
-        leg2_sl_price, leg2_tgt_price = get_exit_prices(entry2, leg2_side, leg_sl_percent, leg_target_percent)
-
-        leg1_active = True
-        leg2_active = True
         max_pnl_seen = 0 
         
         while True:
-            live1 = smartApi.ltpData("NFO", leg1_symbol, leg1_token)['data']['ltp']
-            live2 = smartApi.ltpData("NFO", leg2_symbol, leg2_token)['data']['ltp']
-            
             pnl = 0
-            if leg1_active: pnl += calc_leg_pnl(live1, target_strike, entry1, leg1_type, leg1_side, 0) * lot_size
-            if leg2_active: pnl += calc_leg_pnl(live2, target_strike, entry2, leg2_type, leg2_side, 0) * lot_size
+            tot_d, tot_t, tot_v = 0, 0, 0
             
-            d1, t1, v1 = get_greeks(target_strike, target_strike, days_to_expiry, leg1_type, leg1_side)
-            d2, t2, v2 = get_greeks(target_strike, target_strike, days_to_expiry, leg2_type, leg2_side)
-            
-            leg1_metric.metric(label=f"Leg 1 ({leg1_type}) Live", value=f"₹ {live1}")
-            leg2_metric.metric(label=f"Leg 2 ({leg2_type}) Live", value=f"₹ {live2}")
+            # 1. Fetch LTPs and Update Metrics
+            for i, leg in enumerate(leg_data):
+                if not leg["active"]:
+                    leg_metrics[i].metric(label=f"🔴 {leg['side']} {leg['strike']} {leg['type']}", value="Closed")
+                    continue
+                    
+                leg["live"] = smartApi.ltpData("NFO", leg["symbol"], leg["token"])['data']['ltp']
+                pnl += calc_leg_pnl(leg["live"], leg["strike"], leg["entry"], leg["type"], leg["side"], 0) * lot_size
+                
+                d, t, v = get_greeks(target_strike, leg["strike"], days_to_expiry, leg["type"], leg["side"])
+                tot_d += d; tot_t += t; tot_v += v
+                
+                leg_metrics[i].metric(label=f"🟢 {leg['side']} {leg['strike']} {leg['type']}", value=f"₹ {leg['live']}")
+                
             pnl_metric.metric(label="Total MTM P&L", value=f"₹ {round(pnl, 2)}", delta=round(pnl, 2))
+            delta_metric.metric(label="Total Delta", value=round(tot_d, 2))
+            theta_metric.metric(label="Total Theta", value=f"₹ {round(tot_t * lot_size, 2)} / day")
+            vega_metric.metric(label="Total Vega", value=round(tot_v, 2))
             
-            delta_metric.metric(label="Total Delta", value=round(d1 + d2, 2))
-            theta_metric.metric(label="Total Theta", value=f"₹ {round((t1 + t2) * lot_size, 2)} / day")
-            vega_metric.metric(label="Total Vega", value=round(v1 + v2, 2))
-            
-            # Trailing SL Check
+            # 2. Trailing SL Check
             if pnl > max_pnl_seen: max_pnl_seen = pnl
             if max_pnl_seen >= tsl_activation:
                 dynamic_sl = max_pnl_seen - tsl_trail_by
                 if pnl <= dynamic_sl:
-                    status_msg.error(f"🛡️ TRAILING SL HIT! Protected Profit at ₹{round(pnl, 2)}. Squaring off...")
-                    if leg1_active: place_order_api(leg1_symbol, leg1_token, lot_size, "SELL" if leg1_side=="BUY" else "BUY")
-                    if leg2_active: place_order_api(leg2_symbol, leg2_token, lot_size, "SELL" if leg2_side=="BUY" else "BUY")
+                    status_msg.error(f"🛡️ TRAILING SL HIT! Protected Profit at ₹{round(pnl, 2)}. Squaring off all...")
+                    for leg in leg_data:
+                        if leg["active"]: place_order_api(leg["symbol"], leg["token"], lot_size, "SELL" if leg["side"]=="BUY" else "BUY")
                     break
 
-            # Smart Exits & Rolling Adjustments
-            if "Straddle" in strategy:
-                # Rolling only applied to Straddles for now
-                if leg1_active:
-                    hit_sl, hit_tgt = check_exit(live1, leg1_side, leg1_sl_price, leg1_tgt_price)
-                    if hit_sl:
-                        st.toast(f"⚠️ {leg1_type} SL Hit! Adjusting...")
-                        place_order_api(leg1_symbol, leg1_token, lot_size, "BUY")
-                        leg1_active = False 
-                        if leg2_active:
-                            place_order_api(leg2_symbol, leg2_token, lot_size, "BUY")
-                            leg2_active = False
+            # 3. Smart Exits & Rolling Adjustments
+            if "Naked Sell" in strategy:
+                # Rolling is active ONLY for naked straddle
+                ce_leg = leg_data[0]
+                pe_leg = leg_data[1]
+                
+                if ce_leg["active"]:
+                    if ce_leg["live"] >= ce_leg["sl"]:
+                        st.toast(f"⚠️ CE Stop Loss Hit! Adjusting...")
+                        place_order_api(ce_leg["symbol"], ce_leg["token"], lot_size, "BUY")
+                        ce_leg["active"] = False 
+                        if pe_leg["active"]:
+                            place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
+                            pe_leg["active"] = False
                         
                         new_strike = target_strike + 500
                         new_token, new_symbol = get_token_info("NIFTY", new_strike, "PE", target_expiry)
                         if new_token:
                             place_order_api(new_symbol, new_token, lot_size, "SELL")
-                            leg2_active = True
-                            leg2_symbol = new_symbol
-                            leg2_token = new_token
-                            live_new = smartApi.ltpData("NFO", leg2_symbol, leg2_token)['data']['ltp']
-                            leg2_sl_price, leg2_tgt_price = get_exit_prices(live_new, "SELL", leg_sl_percent, leg_target_percent)
-                    elif hit_tgt:
-                        place_order_api(leg1_symbol, leg1_token, lot_size, "BUY")
-                        leg1_active = False 
+                            pe_leg["active"] = True
+                            pe_leg["symbol"] = new_symbol
+                            pe_leg["token"] = new_token
+                            pe_leg["strike"] = new_strike
+                            pe_leg["live"] = smartApi.ltpData("NFO", new_symbol, new_token)['data']['ltp']
+                            pe_leg["sl"], pe_leg["tgt"] = get_exit_prices(pe_leg["live"], "SELL", leg_sl_percent, leg_target_percent)
+                    elif ce_leg["live"] <= ce_leg["tgt"]:
+                        place_order_api(ce_leg["symbol"], ce_leg["token"], lot_size, "BUY")
+                        ce_leg["active"] = False 
 
-                if leg2_active:
-                    hit_sl, hit_tgt = check_exit(live2, leg2_side, leg2_sl_price, leg2_tgt_price)
-                    if hit_sl:
-                        st.toast(f"⚠️ {leg2_type} SL Hit! Adjusting...")
-                        place_order_api(leg2_symbol, leg2_token, lot_size, "BUY")
-                        leg2_active = False 
-                        if leg1_active:
-                            place_order_api(leg1_symbol, leg1_token, lot_size, "BUY")
-                            leg1_active = False
+                if pe_leg["active"]:
+                    if pe_leg["live"] >= pe_leg["sl"]:
+                        st.toast(f"⚠️ PE Stop Loss Hit! Adjusting...")
+                        place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
+                        pe_leg["active"] = False 
+                        if ce_leg["active"]:
+                            place_order_api(ce_leg["symbol"], ce_leg["token"], lot_size, "BUY")
+                            ce_leg["active"] = False
                         
                         new_strike = target_strike - 500 
                         new_token, new_symbol = get_token_info("NIFTY", new_strike, "CE", target_expiry)
                         if new_token:
                             place_order_api(new_symbol, new_token, lot_size, "SELL")
-                            leg1_active = True
-                            leg1_symbol = new_symbol
-                            leg1_token = new_token
-                            live_new = smartApi.ltpData("NFO", leg1_symbol, leg1_token)['data']['ltp']
-                            leg1_sl_price, leg1_tgt_price = get_exit_prices(live_new, "SELL", leg_sl_percent, leg_target_percent)
-                    elif hit_tgt:
-                        place_order_api(leg2_symbol, leg2_token, lot_size, "BUY")
-                        leg2_active = False 
-
+                            ce_leg["active"] = True
+                            ce_leg["symbol"] = new_symbol
+                            ce_leg["token"] = new_token
+                            ce_leg["strike"] = new_strike
+                            ce_leg["live"] = smartApi.ltpData("NFO", new_symbol, new_token)['data']['ltp']
+                            ce_leg["sl"], ce_leg["tgt"] = get_exit_prices(ce_leg["live"], "SELL", leg_sl_percent, leg_target_percent)
+                    elif pe_leg["live"] <= pe_leg["tgt"]:
+                        place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
+                        pe_leg["active"] = False 
             else:
-                # Normal SL/Target Exits for Hedged Futures
-                if leg1_active:
-                    hit_sl, hit_tgt = check_exit(live1, leg1_side, leg1_sl_price, leg1_tgt_price)
-                    if hit_sl or hit_tgt:
-                        st.toast(f"🔔 {leg1_type} Hit Target/SL!")
-                        place_order_api(leg1_symbol, leg1_token, lot_size, "SELL" if leg1_side=="BUY" else "BUY")
-                        leg1_active = False
+                # Normal target/SL exits for Hedged positions (Iron Butterfly etc.)
+                all_closed = True
+                for leg in leg_data:
+                    if leg["active"]:
+                        all_closed = False
+                        hit_sl, hit_tgt = check_exit(leg["live"], leg["side"], leg["sl"], leg["tgt"])
+                        if hit_sl or hit_tgt:
+                            st.toast(f"🔔 {leg['strike']} {leg['type']} Hit Target/SL!")
+                            place_order_api(leg["symbol"], leg["token"], lot_size, "SELL" if leg["side"]=="BUY" else "BUY")
+                            leg["active"] = False
+                if all_closed:
+                    status_msg.error("🛑 All legs squared off. Algo stopped.")
+                    break
                 
-                if leg2_active:
-                    hit_sl, hit_tgt = check_exit(live2, leg2_side, leg2_sl_price, leg2_tgt_price)
-                    if hit_sl or hit_tgt:
-                        st.toast(f"🔔 {leg2_type} Hit Target/SL!")
-                        place_order_api(leg2_symbol, leg2_token, lot_size, "SELL" if leg2_side=="BUY" else "BUY")
-                        leg2_active = False
-            
-            if not leg1_active and not leg2_active:
-                status_msg.error("🛑 Both legs squared off. Algo stopped.")
-                break
-                
-            # Total Max Loss Check
+            # 4. Total Max Loss Check
             if pnl <= max_loss:
                 status_msg.error(f"⚠️ TOTAL MAX LOSS HIT! (-₹{abs(round(pnl,2))}) Squaring off all...")
-                if leg1_active: place_order_api(leg1_symbol, leg1_token, lot_size, "SELL" if leg1_side=="BUY" else "BUY")
-                if leg2_active: place_order_api(leg2_symbol, leg2_token, lot_size, "SELL" if leg2_side=="BUY" else "BUY")
+                for leg in leg_data:
+                    if leg["active"]: place_order_api(leg["symbol"], leg["token"], lot_size, "SELL" if leg["side"]=="BUY" else "BUY")
                 break
                 
             time.sleep(1)
             
 else:
-    st.warning("⚠️ Token nahi mila. Kripya Expiry Date check karein (Jaise: 29DEC2026).")
+    st.warning("⚠️ Koi ek Token nahi mila. Kripya Expiry Date check karein (Jaise: 29DEC2026) ya Strike badlein.")
