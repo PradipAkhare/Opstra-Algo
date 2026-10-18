@@ -59,16 +59,14 @@ default_symbol_idx = unique_symbols.index("NIFTY") if "NIFTY" in unique_symbols 
 # 3. ADVANCED HELPER FUNCTIONS (MULTI-LEG)
 # ==========================================
 def get_token_info(symbol, strike_price, inst_type, expiry):
-    # 👇 BUG FIXED: Robust numeric matching for API formats 👇
     filtered_df = df[((df['exch_seg'] == 'NFO') | (df['exch_seg'] == 'MCX')) & 
                      (df['name'] == symbol) & 
-                     (df['expiry'] == expiry)].copy()
+                     (df['expiry'] == expiry)]
     
     if inst_type == "FUT":
         filtered_df = filtered_df[filtered_df['symbol'].str.endswith('FUT')]
     else:
-        filtered_df['numeric_strike'] = pd.to_numeric(filtered_df['strike'], errors='coerce') / 100
-        filtered_df = filtered_df[(filtered_df['numeric_strike'] == float(strike_price)) & 
+        filtered_df = filtered_df[(filtered_df['strike'] == str(float(strike_price) * 100)) & 
                                   (filtered_df['symbol'].str.endswith(inst_type))]
     
     if not filtered_df.empty:
@@ -227,12 +225,8 @@ if "Option Chain" in strategy:
         
         chain_data = []
         for strike in range(int(target_strike) - (10 * int(strike_step)), int(target_strike) + (11 * int(strike_step)), int(strike_step)):
-            # GREEKS & PRICES
             ce_d, ce_t, ce_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "CE")
             pe_d, pe_t, pe_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "PE")
-            
-            ce_price = round(bs_price(target_strike, strike, days_to_expiry, "CE"), 2)
-            pe_price = round(bs_price(target_strike, strike, days_to_expiry, "PE"), 2)
             
             dist = abs(strike - target_strike)
             ce_oi = int(100000 * math.exp(-(dist**2)/100000))
@@ -250,7 +244,6 @@ if "Option Chain" in strategy:
                 
             chain_data.append({
                 "Buy CE": False, "Sell CE": False,
-                "CE Price": ce_price, 
                 "CE Trend": ce_trend,
                 "CE OI": ce_oi, 
                 "CE Theta": ce_t, "CE Delta": ce_d, 
@@ -259,12 +252,12 @@ if "Option Chain" in strategy:
                 "PE Delta": pe_d, "PE Theta": pe_t, 
                 "PE OI": pe_oi,
                 "PE Trend": pe_trend,
-                "PE Price": pe_price, 
                 "Buy PE": False, "Sell PE": False
             })
             
         df_chain = pd.DataFrame(chain_data)
         
+        # 👇 SMART ITM / OTM / ATM CONDITIONAL FORMATTING 👇
         def style_option_chain(row):
             styles = []
             current_strike = int(row['STRIKE'])
@@ -292,12 +285,10 @@ if "Option Chain" in strategy:
                 "STRIKE": st.column_config.NumberColumn("🎯 STRIKE", help="Center Strike", required=True),
                 "Buy CE": st.column_config.CheckboxColumn("🟢 Buy CE"),
                 "Sell CE": st.column_config.CheckboxColumn("🔴 Sell CE"),
-                "CE Price": st.column_config.NumberColumn("₹ CE Price", format="%.2f"),
                 "CE Trend": st.column_config.TextColumn("📈 CE Trend"),
                 "CE OI": st.column_config.ProgressColumn("📊 CE OI Bar", format="%d", min_value=0, max_value=100000),
                 "PE OI": st.column_config.ProgressColumn("📊 PE OI Bar", format="%d", min_value=0, max_value=100000),
                 "PE Trend": st.column_config.TextColumn("📉 PE Trend"),
-                "PE Price": st.column_config.NumberColumn("₹ PE Price", format="%.2f"),
                 "Buy PE": st.column_config.CheckboxColumn("🟢 Buy PE"),
                 "Sell PE": st.column_config.CheckboxColumn("🔴 Sell PE"),
             }
@@ -583,4 +574,4 @@ if len(legs_config) > 0:
         st.warning(f"⚠️ {symbol_name} ka Token nahi mila. Kripya Expiry Date check karein ya Strike badlein.")
 else:
     if "Option Chain" in strategy:
-        st.info("👆
+        st.info("👆 Option Chain mein se koi leg select karein (Buy/Sell check box pe tick mark karein) taaki Payoff Graph dikh sake!")
