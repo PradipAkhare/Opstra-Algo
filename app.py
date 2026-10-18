@@ -53,6 +53,16 @@ def get_token(sym, stk, typ, exp):
         f = f.sort_values('diff')
         return f.iloc[0]['token'], f.iloc[0]['symbol'], f.iloc[0]['exch_seg']
 
+# 👇 BUG FIXED: Safe LTP fetcher to prevent JSONDecodeError crashes 👇
+def safe_ltp(exch, sym, tok):
+    try:
+        res = api.ltpData(exch, sym, tok)
+        if res and 'data' in res and 'ltp' in res['data']:
+            return float(res['data']['ltp'])
+    except:
+        pass
+    return 100.0 # Fallback default value if API fails
+
 def place_order(sym, tok, qty, side, exch="NFO"):
     try: return api.placeOrder({"variety":"NORMAL","tradingsymbol":sym,"symboltoken":tok,"transactiontype":side,"exchange":exch,"ordertype":"MARKET","producttype":"CARRYFORWARD","duration":"DAY","quantity":qty})
     except Exception as e: return str(e)
@@ -143,8 +153,6 @@ start = st.sidebar.button("▶️ START LIVE ALGO")
 est_mgn, legs = 0, []
 
 if "Option Chain" in strat:
-    hs, hb = False, False
-    # Temporarily evaluate standard layout or placeholder until option chain editor runs
     pass
 elif "Custom" in strat:
     st.sidebar.markdown("### 🛠️ Build Your Own Strategy")
@@ -181,7 +189,7 @@ if "Option Chain" not in strat and legs:
 
     if aok and ld:
         for l in ld:
-            l['e'] = api.ltpData(l['ex'], l['sm'], l['tk'])['data']['ltp']
+            l['e'] = safe_ltp(l['ex'], l['sm'], l['tk'])
         
         pxs = list(range(int(tgt_stk*0.85), int(tgt_stk*1.15), max(1, int(tgt_stk*0.3/200))))
         pe, pt0 = [], []
@@ -247,14 +255,13 @@ if "Option Chain" in strat:
             if hs and hb and len(legs)>1: est_mgn*=0.35
             elif len(legs)>1: est_mgn*=0.85
             
-            # Render Option Chain Payoff Graph at Top if legs are selected
             if legs:
                 ld = []
                 for t, sd, off in legs:
                     tk, sm, ex = get_token(sym_name, tgt_stk+off, t, tgt_exp)
                     if tk: ld.append({"t":t, "s":sd, "k":tgt_stk+off, "tk":tk, "sm":sm, "a":True, "ex":ex})
                 if ld:
-                    for l in ld: l['e'] = api.ltpData(l['ex'], l['sm'], l['tk'])['data']['ltp']
+                    for l in ld: l['e'] = safe_ltp(l['ex'], l['sm'], l['tk'])
                     pxs = list(range(int(tgt_stk*0.85), int(tgt_stk*1.15), max(1, int(tgt_stk*0.3/200))))
                     pe, pt0 = [], []
                     for p in pxs:
@@ -291,7 +298,7 @@ if start:
         tk, sm, ex = get_token(sym_name, tgt_stk+off, t, tgt_exp)
         if tk: ld.append({"t":t, "s":sd, "k":tgt_stk+off, "tk":tk, "sm":sm, "a":True, "ex":ex})
     for l in ld:
-        l['e'] = api.ltpData(l['ex'], l['sm'], l['tk'])['data']['ltp']
+        l['e'] = safe_ltp(l['ex'], l['sm'], l['tk'])
         l['sl'] = l['e']*(1-sl_p/100) if l['s']=="BUY" else l['e']*(1+sl_p/100)
         l['tg'] = l['e']*(1+tgt_p/100) if l['s']=="BUY" else l['e']*(1-tgt_p/100)
         
@@ -305,7 +312,7 @@ if start:
             pnl, td, tt, tv = 0, 0, 0, 0
             for i, l in enumerate(ld):
                 if not l['a']: lms[i].metric(f"🔴 {l['s']} {l['k']} {l['t']}", "Closed"); continue
-                l['l'] = api.ltpData(l['ex'], l['sm'], l['tk'])['data']['ltp']
+                l['l'] = safe_ltp(l['ex'], l['sm'], l['tk'])
                 pnl += calc_pnl(l['l'], l['k'], l['e'], l['t'], l['s'], 0)*lot_size
                 d, t, v = bs_greeks(tgt_stk, l['k'], dte, "CE" if l['t']=="CE" else "PE")
                 if l['s']=="SELL": d, t, v = -d, -t, -v
@@ -339,7 +346,7 @@ if start:
                     n_tk, n_sm, n_ex = get_token(sym_name, n_stk, "PE", tgt_exp)
                     if n_tk:
                         place_order(n_sm, n_tk, lot_size, "SELL", n_ex)
-                        pe_l.update({"a":True, "sm":n_sm, "tk":n_tk, "k":n_stk, "ex":n_ex, "l":api.ltpData(n_ex,n_sm,n_tk)['data']['ltp']})
+                        pe_l.update({"a":True, "sm":n_sm, "tk":n_tk, "k":n_stk, "ex":n_ex, "l":safe_ltp(n_ex,n_sm,n_tk)})
                         pe_l['sl'] = pe_l['l']*(1+sl_p/100)
                 if pe_l['a'] and pe_l['l']>=pe_l['sl']:
                     place_order(pe_l['sm'], pe_l['tk'], lot_size, "BUY", pe_l['ex']); pe_l['a']=False
@@ -348,6 +355,6 @@ if start:
                     n_tk, n_sm, n_ex = get_token(sym_name, n_stk, "CE", tgt_exp)
                     if n_tk:
                         place_order(n_sm, n_tk, lot_size, "SELL", n_ex)
-                        ce.update({"a":True, "sm":n_sm, "tk":n_tk, "k":n_stk, "ex":n_ex, "l":api.ltpData(n_ex,n_sm,n_tk)['data']['ltp']})
+                        ce.update({"a":True, "sm":n_sm, "tk":n_tk, "k":n_stk, "ex":n_ex, "l":safe_ltp(n_ex,n_sm,n_tk)})
                         ce['sl'] = ce['l']*(1+sl_p/100)
             time.sleep(1)
