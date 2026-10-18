@@ -137,7 +137,7 @@ if start_algo:
         
         # --- GRAPH DRAW KARNA ---
         st.subheader("📉 Expiry Payoff Graph")
-        prices = range(int(target_strike) - 1000, int(target_strike) + 1000, 10)
+        prices = range(int(target_strike) - 2500, int(target_strike) + 2500, 10)
         pnl_list = []
         for p in prices:
             ce_pnl = entry_ce - max(0, p - target_strike)
