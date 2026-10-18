@@ -225,8 +225,13 @@ if "Option Chain" in strategy:
         
         chain_data = []
         for strike in range(int(target_strike) - (10 * int(strike_step)), int(target_strike) + (11 * int(strike_step)), int(strike_step)):
+            # GREEKS & PRICES
             ce_d, ce_t, ce_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "CE")
             pe_d, pe_t, pe_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "PE")
+            
+            # 👇 CALCULATING THEORETICAL PRICES HERE 👇
+            ce_price = round(bs_price(target_strike, strike, days_to_expiry, "CE"), 2)
+            pe_price = round(bs_price(target_strike, strike, days_to_expiry, "PE"), 2)
             
             dist = abs(strike - target_strike)
             ce_oi = int(100000 * math.exp(-(dist**2)/100000))
@@ -244,6 +249,7 @@ if "Option Chain" in strategy:
                 
             chain_data.append({
                 "Buy CE": False, "Sell CE": False,
+                "CE Price": ce_price, # 👈 Added CE Price
                 "CE Trend": ce_trend,
                 "CE OI": ce_oi, 
                 "CE Theta": ce_t, "CE Delta": ce_d, 
@@ -252,6 +258,7 @@ if "Option Chain" in strategy:
                 "PE Delta": pe_d, "PE Theta": pe_t, 
                 "PE OI": pe_oi,
                 "PE Trend": pe_trend,
+                "PE Price": pe_price, # 👈 Added PE Price
                 "Buy PE": False, "Sell PE": False
             })
             
@@ -285,10 +292,12 @@ if "Option Chain" in strategy:
                 "STRIKE": st.column_config.NumberColumn("🎯 STRIKE", help="Center Strike", required=True),
                 "Buy CE": st.column_config.CheckboxColumn("🟢 Buy CE"),
                 "Sell CE": st.column_config.CheckboxColumn("🔴 Sell CE"),
+                "CE Price": st.column_config.NumberColumn("₹ CE Price", format="%.2f"), # 👈 Price Formatting
                 "CE Trend": st.column_config.TextColumn("📈 CE Trend"),
                 "CE OI": st.column_config.ProgressColumn("📊 CE OI Bar", format="%d", min_value=0, max_value=100000),
                 "PE OI": st.column_config.ProgressColumn("📊 PE OI Bar", format="%d", min_value=0, max_value=100000),
                 "PE Trend": st.column_config.TextColumn("📉 PE Trend"),
+                "PE Price": st.column_config.NumberColumn("₹ PE Price", format="%.2f"), # 👈 Price Formatting
                 "Buy PE": st.column_config.CheckboxColumn("🟢 Buy PE"),
                 "Sell PE": st.column_config.CheckboxColumn("🔴 Sell PE"),
             }
