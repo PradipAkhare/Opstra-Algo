@@ -222,7 +222,6 @@ for l_type, l_side, l_off in legs_config:
         all_tokens_found = False
 
 if all_tokens_found:
-    
     # --- PART 1: PRE-TRADE ANALYSIS ---
     for leg in leg_data:
         leg["entry"] = smartApi.ltpData("NFO", leg["symbol"], leg["token"])['data']['ltp']
@@ -247,6 +246,7 @@ if all_tokens_found:
     max_p = max(pnl_expiry)
     max_l = min(pnl_expiry)
     
+    # 👇 SMART UNLIMITED CHECK (Graph ke ends check karega) 👇
     right_diff = pnl_expiry[-1] - pnl_expiry[-2]
     left_diff = pnl_expiry[0] - pnl_expiry[1]
     
@@ -272,6 +272,7 @@ if all_tokens_found:
     fig.add_vline(x=target_strike, line_dash="dot", line_color="red", annotation_text="Strike")
     fig.add_hline(y=0, line_color="black")
     st.plotly_chart(fig, use_container_width=True)
+
     
     # --- PART 2: LIVE ALGO EXECUTION ---
     if start_algo:
