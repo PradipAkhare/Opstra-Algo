@@ -116,6 +116,8 @@ target_profit = st.sidebar.number_input("Target Profit (₹)", value=1000)
 max_loss = st.sidebar.number_input("Max Loss (₹)", value=-500)
 days_to_expiry = st.sidebar.number_input("Days to Expiry", value=3)
 start_algo = st.sidebar.button("▶️ START LIVE ALGO")
+leg_sl_percent = st.sidebar.number_input("Individual Leg SL (%)", 10, 200, 50, step=10)
+leg_target_percent = st.sidebar.number_input("Individual Leg Target (%)", 10, 100, 90, step=10)
 
 # ==========================================
 # 4. MAIN DASHBOARD LOGIC
@@ -198,11 +200,30 @@ if start_algo:
             vega_metric.metric(label="Total Vega (Vol Impact)", value=round(total_vega, 2))
             
             # 👇 RISK MANAGEMENT (AUTO EXIT WITH REAL ORDERS) 👇
-            if pnl >= target_profit:
-                status_msg.success(f"🎉 TARGET HIT! (+₹{round(pnl,2)}) Auto-squaring off...")
-                place_exit_order(ce_symbol, ce_token, lot_size) 
-                place_exit_order(pe_symbol, pe_token, lot_size) 
-                st.balloons() 
+            # 👇 SMART AUTO ADJUSTMENT (LEG-WISE SL & TARGET) 👇
+            if ce_active:
+                if live_ce >= ce_sl_price:
+                    st.toast(f"⚠️ CE Stop Loss Hit at ₹{live_ce}! Exiting CE...")
+                    place_exit_order(ce_symbol, ce_token, lot_size)
+                    ce_active = False 
+                elif live_ce <= ce_target_price:
+                    st.toast(f"🎯 CE Target Hit (90% Profit) at ₹{live_ce}! Exiting CE...")
+                    place_exit_order(ce_symbol, ce_token, lot_size)
+                    ce_active = False 
+
+            if pe_active:
+                if live_pe >= pe_sl_price:
+                    st.toast(f"⚠️ PE Stop Loss Hit at ₹{live_pe}! Exiting PE...")
+                    place_exit_order(pe_symbol, pe_token, lot_size)
+                    pe_active = False 
+                elif live_pe <= pe_target_price:
+                    st.toast(f"🎯 PE Target Hit (90% Profit) at ₹{live_pe}! Exiting PE...")
+                    place_exit_order(pe_symbol, pe_token, lot_size)
+                    pe_active = False 
+                
+            # Agar dono legs cut gaye, toh algo stop kar do
+            if not ce_active and not pe_active:
+                status_msg.error("🛑 Both legs squared off (SL or Target hit). Algo stopped.")
                 break
                 
             elif pnl <= max_loss:
