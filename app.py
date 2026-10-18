@@ -59,13 +59,31 @@ def get_token_info(symbol, strike_price, option_type, expiry):
         return filtered_df.iloc[0]['token'], filtered_df.iloc[0]['symbol']
     return None, None
 
-def place_exit_order(symbol, token, qty, transaction_type="BUY"):
+ def place_exit_order(symbol, token, qty, transaction_type="BUY"):
     try:
         orderparams = {
             "variety": "NORMAL",
             "tradingsymbol": symbol,
             "symboltoken": token,
             "transactiontype": transaction_type, 
+            "exchange": "NFO",
+            "ordertype": "MARKET",
+            "producttype": "CARRYFORWARD", 
+            "duration": "DAY",
+            "quantity": qty
+        }
+        orderId = smartApi.placeOrder(orderparams)
+        return orderId
+    except Exception as e:
+        return f"Error: {e}"
+
+def place_new_sell_order(symbol, token, qty):
+    try:
+        orderparams = {
+            "variety": "NORMAL",
+            "tradingsymbol": symbol,
+            "symboltoken": token,
+            "transactiontype": "SELL", 
             "exchange": "NFO",
             "ordertype": "MARKET",
             "producttype": "CARRYFORWARD", 
