@@ -14,7 +14,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Opstra Clone: Pro Backtest Simulator with Unlocked Backdate & Payoff")
+st.title("🚀 Opstra Clone: Pro Backtest Simulator with Safe Variable Initialization")
 
 api_key, client_id, password, totp_secret = "A04oCs0I", "V551760", "2015", "4YILABJ5MTMUTRC45SUPNKANOU"
 
@@ -56,7 +56,6 @@ def get_token(sym, stk, typ, exp):
     else:
         f = fno_df[(fno_df['name']==sym) & (fno_df['expiry']==exp) & (fno_df['symbol'].str.endswith(typ))].copy()
         if f.empty:
-            # Fallback for backtest master files where expired contracts might not exist
             return 99999, f"{sym}{exp}{typ}", "NFO"
         f['num_stk'] = pd.to_numeric(f['strike'], errors='coerce')
         f['diff'] = f['num_stk'].apply(lambda x: min(abs(x-float(stk)), abs((x/100)-float(stk)), abs((x/10000)-float(stk))))
@@ -131,13 +130,18 @@ else: all_exps, c_lot, c_step, c_stk = ["29DEC2026"], 25, 50, 25000
 sm_stks = {"NIFTY":24000, "BANKNIFTY":51000, "FINNIFTY":23000, "SENSEX":80000, "BANKEX":60000, "CRUDEOIL":6000, "GOLD":75000, "RELIANCE":3000}
 if sym_name in sm_stks: c_stk = sm_stks[sym_name]
 
-# 🌟 UNLOCKED BACKDATE & EXPIRY INPUT (TEXT INPUT ALLOWS ANY PAST/FUTURE EXPIRY)
+# Safe default values for simulator variables
+sim_step = 1
+sim_iv = 15.0
+sim_spot_shift = 0.0
+selected_backtest_date = datetime.date.today()
+selected_time = "09:15 AM"
+
 if "Backtest" in mode:
     st.sidebar.markdown("### 📅 Backdate & Expiry Config")
     selected_backtest_date = st.sidebar.date_input("Backtest Date", value=datetime.date(2026, 8, 20))
     selected_time = st.sidebar.selectbox("⏱️ Select Time", ["09:15 AM", "09:35 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM", "03:00 PM"], index=1)
     
-    # Fully editable text input for expiry so past expiries (e.g. 27AUG2026) can be typed freely!
     tgt_exp = st.sidebar.text_input("Type Expiry Date (e.g. 27AUG2026)", value="27AUG2026").upper()
     
     d_str = str(selected_backtest_date)
@@ -220,7 +224,7 @@ else: legs = [("FUT","SELL",0),("CE","BUY",0)]; est_mgn=45000
 est_mgn = (lot_size/25)*est_mgn
 
 # ==========================================
-# 5. PAYOFF GRAPH (TOP - INSTANT RENDER FOR STRATEGIES)
+# 5. PAYOFF GRAPH (TOP)
 # ==========================================
 ld, aok = [], True
 if "Option Chain" not in strat and legs:
@@ -341,7 +345,7 @@ if start or ("Backtest" in mode and st.session_state.get("is_playing", False)):
                 loop_steps = range(1, 11) if st.session_state.get("is_playing", False) else [sim_step]
                 for step in loop_steps:
                     curr_time = f"{selected_time if 'Backtest' in mode else 'Live'} (+{step} Candle)"
-                    clock_placeholder.markdown(f"### 🕒 Time: **{curr_time}** | Expiry: **{tgt_exp}** | Spot: **{eff_spot:.2f}** | Status: {'▶️ Playing'}</st>")
+                    clock_placeholder.markdown(f"### 🕒 Time: **{curr_time}** | Expiry: **{tgt_exp}** | Spot: **{eff_spot:.2f}** | Status: {'▶️ Playing'}")
                     
                     step_spot = eff_spot * (1 + (step-1)*0.2 / 100.0)
                     pnl, td, tt, tv = 0, 0, 0, 0
@@ -379,7 +383,7 @@ if start or ("Backtest" in mode and st.session_state.get("is_playing", False)):
                     fig_live.add_trace(go.Scatter(x=pxs, y=pt0, mode='lines', name=f'T+0 Payoff ({curr_time})', line=dict(color='darkorange', width=3)))
                     fig_live.add_vline(x=step_spot, line_dash="dash", line_color="green", annotation_text=f"Spot: {step_spot:.1f}")
                     fig_live.add_hline(y=0, line_color="black")
-                    graph_placeholder.plotly_chart(fig_live, use_container_width=True, key=f"payoff_play_{step}")
+                    graph_previous_step = graph_placeholder.plotly_chart(fig_live, use_container_width=True, key=f"payoff_play_{step}")
                     
                     if st.session_state.get("is_playing", False):
                         time.sleep(1)
