@@ -319,6 +319,47 @@ if start_algo:
                     st.toast(f"🎯 CE Target Hit (90% Profit)! Exiting CE...")
                     place_exit_order(ce_symbol, ce_token, lot_size)
                     ce_active = False 
-
-            if pe_active:
-                if live_pe >= pe_
+if pe_active:
+                if live_pe >= pe_sl_price:
+                    st.toast(f"⚠️ PE Stop Loss Hit at ₹{live_pe}! Adjusting Position...")
+                    place_exit_order(pe_symbol, pe_token, lot_size)
+                    pe_active = False 
+                    
+                    if ce_active:
+                        place_exit_order(ce_symbol, ce_token, lot_size)
+                        ce_active = False
+                        st.toast(f"🔄 CE also booked to roll down!")
+                    
+                    new_strike = target_strike - 500 
+                    new_ce_token, new_ce_symbol = get_token_info("NIFTY", new_strike, "CE", target_expiry)
+                    
+                    if new_ce_token:
+                        place_new_sell_order(new_ce_symbol, new_ce_token, lot_size)
+                        st.toast(f"✅ Rolled Down: Sold Naya Call {new_strike} CE!")
+                        ce_active = True
+                        ce_symbol = new_ce_symbol
+                        ce_token = new_ce_token
+                        live_new_ce = smartApi.ltpData("NFO", ce_symbol, ce_token)['data']['ltp']
+                        ce_sl_price = live_new_ce * (1 + (leg_sl_percent / 100))
+                        ce_target_price = live_new_ce * (1 - (leg_target_percent / 100))
+                        
+                elif live_pe <= pe_target_price:
+                    st.toast(f"🎯 PE Target Hit (90% Profit)! Exiting PE...")
+                    place_exit_order(pe_symbol, pe_token, lot_size)
+                    pe_active = False 
+                
+            if not ce_active and not pe_active:
+                status_msg.error("🛑 Both legs squared off. Algo stopped.")
+                break
+                
+            # Total Max Loss Check
+            if pnl <= max_loss:
+                status_msg.error(f"⚠️ TOTAL MAX LOSS HIT! (-₹{abs(round(pnl,2))}) Squaring off all...")
+                if ce_active: place_exit_order(ce_symbol, ce_token, lot_size)
+                if pe_active: place_exit_order(pe_symbol, pe_token, lot_size)
+                break
+                
+            time.sleep(1)
+            
+    else:
+        st.error("❌ Token nahi mila. Kripya Expiry date check karein.")
