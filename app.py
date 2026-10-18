@@ -7,7 +7,6 @@ from SmartApi import SmartConnect
 # ==========================================
 st.set_page_config(page_title="Opstra Clone", layout="wide")
 
-# 👇 CSS TO EXPAND TABLE WIDTH & REMOVE CONSTRAINTS 👇
 st.markdown("""
     <style>
     .block-container { max-width: 98% !important; padding-top: 1rem; padding-bottom: 1rem; }
@@ -113,7 +112,7 @@ sym_name = st.sidebar.selectbox("🔍 Search F&O Symbol", options=unique_syms, i
 
 sym_df = fno_df[fno_df['name']==sym_name]
 if not sym_df.empty:
-    opt_df = sym_df[sym_df['symbol'].str.endswith('CE') | sym_df['symbol'].str.endswith('PE')]
+    opt_df = sym_df[sym_df['symbol'].str.endswith('CE') | symbol_df['symbol'].str.endswith('PE')]
     if not opt_df.empty:
         exps = sorted(opt_df['expiry'].dropna().unique(), key=parse_exp)
         near_df = opt_df[opt_df['expiry']==exps[0]]
@@ -220,11 +219,15 @@ if "Option Chain" not in strat and legs:
             st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
-# 6. OPTION CHAIN BUILDER (ALL COLUMNS VISIBLE)
+# 6. OPTION CHAIN BUILDER (SPLIT VIEW)
 # ==========================================
 if "Option Chain" in strat:
     with st.expander(f"⛓️ {sym_name} Option Chain", expanded=True):
         st.markdown(f"#### 📍 {sym_name} ATM: **{tgt_stk}**")
+        
+        # 👇 TOGGLE VIEW: COMPACT (CORE INFO) VS ADVANCED (ALL COLUMNS) 👇
+        view_mode = st.radio("👁️ View Mode", ["Compact View (LTP, OI, Chg OI, Strike, Build-up)", "Expand All Columns (Greeks & Details)"], horizontal=True)
+
         ch_data = []
         for s in range(int(tgt_stk - 10*stk_step), int(tgt_stk + 11*stk_step), int(stk_step)):
             if s <= 0: continue
@@ -232,7 +235,27 @@ if "Option Chain" in strat:
             pd_d, pt, pv = bs_greeks(tgt_stk, s, dte, "PE")
             cp, pp = round(bs_price(tgt_stk, s, dte, "CE"),2), round(bs_price(tgt_stk, s, dte, "PE"),2)
             oi = int(100000*math.exp(-((s-tgt_stk)**2)/100000))
-            ch_data.append({"Buy CE":False, "Sell CE":False, "CE Pr":cp, "CE Trnd":"🔴 Sell" if s>=tgt_stk else "🚀 Buy", "CE OI":oi, "CE Th":ct, "CE Dl":cd, "Spot":"ATM" if s==tgt_stk else "", "STRIKE":s, "PE Dl":pd_d, "PE Th":pt, "PE OI":oi, "PE Trnd":"🟢 Buy" if s>tgt_stk else "🔴 Sell", "PE Pr":pp, "Buy PE":False, "Sell PE":False})
+            choi = int(oi * 0.05) # Simulated Change in OI
+            
+            ce_build = "🔴 Short Buildup" if s >= tgt_stk else "🚀 Short Covering"
+            pe_build = "🟢 Long Buildup" if s > tgt_stk else "🔴 Short Buildup"
+            
+            if "Compact" in view_mode:
+                ch_data.append({
+                    "Buy CE": False, "Sell CE": False,
+                    "CE LTP": cp, "CE OI": oi, "CE ChgOI": choi, "CE Build-up": ce_build,
+                    "Spot": "🎯 ATM" if s == tgt_stk else "", "STRIKE": s,
+                    "PE Build-up": pe_build, "PE ChgOI": choi, "PE OI": oi, "PE LTP": pp,
+                    "Buy PE": False, "Sell PE": False
+                })
+            else:
+                ch_data.append({
+                    "Buy CE": False, "Sell CE": False,
+                    "CE LTP": cp, "CE OI": oi, "CE ChgOI": choi, "CE Build-up": ce_build, "CE Th": ct, "CE Dl": cd,
+                    "Spot": "🎯 ATM" if s == tgt_stk else "", "STRIKE": s,
+                    "PE Dl": pd_d, "PE Th": pt, "PE OI": oi, "PE ChgOI": choi, "PE Build-up": pe_build, "PE LTP": pp,
+                    "Buy PE": False, "Sell PE": False
+                })
         
         df_ch = pd.DataFrame(ch_data)
         def style_ch(row):
@@ -245,7 +268,6 @@ if "Option Chain" in strat:
             return res
 
         if not df_ch.empty:
-            # 👇 FULL WIDTH WIDE DATA EDITOR TO SHOW ALL COLUMNS 👇
             ed_ch = st.data_editor(df_ch.style.apply(style_ch, axis=1), hide_index=True, use_container_width=True)
             hs, hb = False, False
             for _, r in ed_ch.iterrows():
