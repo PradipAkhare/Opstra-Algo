@@ -569,7 +569,7 @@ if len(legs_config) > 0:
                             break
                             
                         time.sleep(1)
-    
+                        
     else:
         st.warning(f"⚠️ {symbol_name} ka Token nahi mila. Kripya Expiry Date check karein ya Strike badlein.")
 else:
