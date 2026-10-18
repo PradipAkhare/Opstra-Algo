@@ -165,9 +165,22 @@ if start_algo:
             pnl_t0.append((ce_t0_pnl + pe_t0_pnl) * lot_size)
             
         fig = go.Figure()
+        
+        # 1. Profit Area (Green)
+        pnl_profit = [p if p >= 0 else 0 for p in pnl_expiry]
+        fig.add_trace(go.Scatter(x=prices, y=pnl_profit, mode='none', 
+                                 fill='tozeroy', fillcolor='rgba(0, 128, 0, 0.3)', showlegend=False))
+                                 
+        # 2. Loss Area (Red)
+        pnl_loss = [p if p < 0 else 0 for p in pnl_expiry]
+        fig.add_trace(go.Scatter(x=prices, y=pnl_loss, mode='none', 
+                                 fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.3)', showlegend=False))
+
+        # 3. Expiry Line (Dashed Blue)
         fig.add_trace(go.Scatter(x=prices, y=pnl_expiry, mode='lines', name='Expiry Payoff', 
-                                 line=dict(color='blue', dash='dash'),
-                                 fill='tozeroy', fillcolor='rgba(0, 128, 0, 0.2)'))
+                                 line=dict(color='blue', dash='dash')))
+                                 
+        # 4. T+0 Line (Solid Orange)
         fig.add_trace(go.Scatter(x=prices, y=pnl_t0, mode='lines', name='T+0 Payoff (Today)', 
                                  line=dict(color='darkorange', width=3)))
                                  
@@ -177,7 +190,6 @@ if start_algo:
         fig.add_hline(y=0, line_color="black")
         
         st.plotly_chart(fig, use_container_width=True)
-        
         # --- LIVE P&L TRACKER UI ---
         st.markdown("---")
         st.subheader("⚡ Live MTM & Option Greeks")
