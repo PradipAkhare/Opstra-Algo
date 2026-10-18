@@ -186,6 +186,8 @@ if start_algo:
     
     if ce_token and pe_token:
         # Initial Prices
+      if ce_token and pe_token:
+        # Initial Prices
         ce_data = smartApi.ltpData("NFO", ce_symbol, ce_token)
         pe_data = smartApi.ltpData("NFO", pe_symbol, pe_token)
         
@@ -193,7 +195,7 @@ if start_algo:
         entry_pe = pe_data['data']['ltp']
         entry_prem = entry_ce + entry_pe
         
-       st.success("✅ Orders Placed Successfully!")
+        st.success("✅ Orders Placed Successfully!")
         
         # --- TRADE SUMMARY METRICS ---
         pop_value = calculate_pop(target_strike, entry_prem, days_to_expiry)
@@ -205,23 +207,6 @@ if start_algo:
         m_col2.metric("Total Premium Collected", f"₹ {round(entry_prem, 2)}")
         m_col3.metric("Max Profit (At Expiry)", f"₹ {round(max_profit, 2)}")
         m_col4.metric("Probability of Profit (POP)", f"{pop_value} %")
-        
-        # --- INTERACTIVE GRAPH DRAW KARNA (PLOTLY) ---
-        st.subheader("📉 Expiry & T+0 Payoff Graph")
-        prices = list(range(int(target_strike) - 2500, int(target_strike) + 2500, 10))
-        pnl_expiry = []
-        pnl_t0 = []
-        
-        for p in prices:
-            ce_exp = entry_ce - max(0, p - target_strike)
-            pe_exp = entry_pe - max(0, target_strike - p)
-            pnl_expiry.append((ce_exp + pe_exp) * lot_size)
-            
-            ce_t0_price = bs_price(p, target_strike, days_to_expiry, "CE")
-            pe_t0_price = bs_price(p, target_strike, days_to_expiry, "PE")
-            ce_t0_pnl = entry_ce - ce_t0_price
-            pe_t0_pnl = entry_pe - pe_t0_price
-            pnl_t0.append((ce_t0_pnl + pe_t0_pnl) * lot_size)
             
         fig = go.Figure()
         
