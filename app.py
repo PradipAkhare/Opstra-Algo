@@ -148,8 +148,8 @@ if start_algo:
         ax.plot(prices, pnl_list, color='blue', linewidth=2)
         ax.axhline(0, color='black', linestyle='--')
         ax.axvline(target_strike, color='green', linestyle=':', label="Strike")
-        ax.fill_between(prices, pnl_list, 0, where=[p >= 0 for p in pnl_list], facecolor='green', alpha=0.3)
-        ax.fill_between(prices, pnl_list, 0, where=[p < 0 for p in pnl_list], facecolor='red', alpha=0.3)
+        ax.fill_between(prices, pnl_list, 0, where=[p >= 0 for p in pnl_list], color='green', alpha=0.5)
+        ax.fill_between(prices, pnl_list, 0, where=[p < 0 for p in pnl_list], color='red', alpha=0.5)
         ax.set_xlabel("Nifty Price")
         ax.set_ylabel("P&L (₹)")
         st.pyplot(fig) # Graph ko website par dikhana
