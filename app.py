@@ -34,11 +34,11 @@ def login_angel():
         pass
     return None
 
-@st.cache_data
+@st.cache_data(ttl=86400) # Har 24 ghante mein naya data layega
 def get_instrument_df():
-    file_name = "instrument_list.json"
-    with open(file_name, 'r') as f:
-        return pd.DataFrame(json.load(f))
+    url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
+    response = requests.get(url)
+    return pd.DataFrame(response.json())
 
 smartApi = login_angel()
 if smartApi is None:
