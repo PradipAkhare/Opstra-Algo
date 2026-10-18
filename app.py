@@ -55,11 +55,17 @@ def get_token_info(symbol, strike_price, option_type, expiry):
                      (df['strike'] == str(strike_price * 100) + '.000000') & 
                      (df['symbol'].str.endswith(option_type)) & 
                      (df['expiry'] == expiry)]
+   def get_token_info(symbol, strike_price, option_type, expiry):
+    filtered_df = df[(df['exch_seg'] == 'NFO') & 
+                     (df['name'] == symbol) & 
+                     (df['strike'] == str(strike_price * 100) + '.000000') & 
+                     (df['symbol'].str.endswith(option_type)) & 
+                     (df['expiry'] == expiry)]
     if not filtered_df.empty:
         return filtered_df.iloc[0]['token'], filtered_df.iloc[0]['symbol']
     return None, None
 
- def place_exit_order(symbol, token, qty, transaction_type="BUY"):
+def place_exit_order(symbol, token, qty, transaction_type="BUY"):
     try:
         orderparams = {
             "variety": "NORMAL",
@@ -79,6 +85,21 @@ def get_token_info(symbol, strike_price, option_type, expiry):
 
 def place_new_sell_order(symbol, token, qty):
     try:
+        orderparams = {
+            "variety": "NORMAL",
+            "tradingsymbol": symbol,
+            "symboltoken": token,
+            "transactiontype": "SELL", 
+            "exchange": "NFO",
+            "ordertype": "MARKET",
+            "producttype": "CARRYFORWARD", 
+            "duration": "DAY",
+            "quantity": qty
+        }
+        orderId = smartApi.placeOrder(orderparams)
+        return orderId
+    except Exception as e:
+        return f"Error: {e}"
         orderparams = {
             "variety": "NORMAL",
             "tradingsymbol": symbol,
