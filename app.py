@@ -179,12 +179,13 @@ leg2_token, leg2_symbol = get_token_info("NIFTY", target_strike, leg2_type, targ
 
 if leg1_token and leg2_token:
     
-    # --- PART 1: PRE-TRADE ANALYSIS ---
+# --- PART 1: PRE-TRADE ANALYSIS ---
     entry1 = smartApi.ltpData("NFO", leg1_symbol, leg1_token)['data']['ltp']
     entry2 = smartApi.ltpData("NFO", leg2_symbol, leg2_token)['data']['ltp']
     current_spot = target_strike # Approximation for center point
     
-    prices = list(range(int(target_strike) - 2500, int(target_strike) + 2500, 10))
+    # Graph range thoda bada kar diya (4000 points) taaki unlimited profit clear dikhe
+    prices = list(range(int(target_strike) - 4000, int(target_strike) + 4000, 10))
     pnl_expiry = []
     pnl_t0 = []
     
@@ -201,8 +202,14 @@ if leg1_token and leg2_token:
     
     max_p = max(pnl_expiry)
     max_l = min(pnl_expiry)
-    max_profit_str = "Unlimited" if max_p > 150000 else f"₹ {round(max_p, 2)}"
-    max_loss_str = "Unlimited" if max_l < -150000 else f"₹ {round(max_l, 2)}"
+    
+    # 👇 SMART UNLIMITED CHECK (Graph ke ends check karega) 👇
+    right_diff = pnl_expiry[-1] - pnl_expiry[-2]
+    left_diff = pnl_expiry[0] - pnl_expiry[1]
+    
+    max_profit_str = "Unlimited 🚀" if (right_diff > 1 or left_diff > 1) else f"₹ {round(max_p, 2)}"
+    max_loss_str = "Unlimited ⚠️" if (right_diff < -1 or left_diff < -1) else f"₹ {round(max_l, 2)}"
+    
     pop_value = calculate_dynamic_pop(prices, pnl_t0, current_spot, days_to_expiry)
     est_margin = (lot_size/25) * 130000 if "Straddle" in strategy else (lot_size/25) * 45000
     
