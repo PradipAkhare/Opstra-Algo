@@ -171,11 +171,9 @@ if start_algo:
         delta_metric = g_col1.empty()
         theta_metric = g_col2.empty()
         vega_metric = g_col3.empty()
-        
-        status_msg = st.empty()
         status_msg = st.empty()
         
-        # 👇 Yahan SL aur Target ke prices set honge (Loop se pehle) 👇
+        # 👇 SL aur Target Prices Calculate 👇
         ce_sl_price = entry_ce * (1 + (leg_sl_percent / 100))
         pe_sl_price = entry_pe * (1 + (leg_sl_percent / 100))
 
@@ -192,7 +190,7 @@ if start_algo:
             live_prem = live_ce + live_pe
             pnl = (entry_prem - live_prem) * lot_size
             
-            # Greeks Calculate karna (Nifty Strike ko Spot Price maan kar)
+            # Greeks Calculate
             ce_delta, ce_theta, ce_vega = black_scholes_greeks(target_strike, target_strike, days_to_expiry, "CE")
             pe_delta, pe_theta, pe_vega = black_scholes_greeks(target_strike, target_strike, days_to_expiry, "PE")
             
@@ -205,12 +203,10 @@ if start_algo:
             pe_metric.metric(label="Put (PE) Live", value=f"₹ {live_pe}")
             pnl_metric.metric(label="Total MTM P&L", value=f"₹ {round(pnl, 2)}", delta=round(pnl, 2))
             
-            # Website par Greeks update karna
             delta_metric.metric(label="Total Delta (Neutral is 0)", value=round(total_delta, 2))
             theta_metric.metric(label="Total Theta (Time Decay)", value=f"₹ {round(total_theta * lot_size, 2)} / day")
             vega_metric.metric(label="Total Vega (Vol Impact)", value=round(total_vega, 2))
             
-            # 👇 RISK MANAGEMENT (AUTO EXIT WITH REAL ORDERS) 👇
             # 👇 SMART AUTO ADJUSTMENT (LEG-WISE SL & TARGET) 👇
             if ce_active:
                 if live_ce >= ce_sl_price:
@@ -237,13 +233,15 @@ if start_algo:
                 status_msg.error("🛑 Both legs squared off (SL or Target hit). Algo stopped.")
                 break
                 
-            elif pnl <= max_loss:
-                status_msg.error(f"⚠️ STOP LOSS HIT! (-₹{abs(round(pnl,2))}) Auto-squaring off...")
-                place_exit_order(ce_symbol, ce_token, lot_size)
-                place_exit_order(pe_symbol, pe_token, lot_size)
+            # Total Max Loss Check
+            if pnl <= max_loss:
+                status_msg.error(f"⚠️ TOTAL MAX LOSS HIT! (-₹{abs(round(pnl,2))}) Squaring off all...")
+                if ce_active: place_exit_order(ce_symbol, ce_token, lot_size)
+                if pe_active: place_exit_order(pe_symbol, pe_token, lot_size)
                 break
                 
             time.sleep(1)
+      
             
     else:
         st.error("❌ Token nahi mila. Kripya Expiry date check karein.")
