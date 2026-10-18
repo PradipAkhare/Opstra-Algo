@@ -138,13 +138,16 @@ stk_key, exp_key, step_key = f"stk_{sym_name}_{strat}", f"exp_{sym_name}_{strat}
 tgt_stk = st.sidebar.number_input("Center Strike (ATM)", value=c_stk, step=c_step, key=stk_key)
 stk_step = st.sidebar.number_input("Strike Step", value=max(c_step, 10), key=step_key)
 
-# 👇 HISTORICAL DATE PICKER FOR BACKTESTING 👇
+# 👇 HISTORICAL DATE & MANUAL EXPIRY INPUT FOR BACKTESTING 👇
 if "Backtest" in mode:
     st.sidebar.markdown("### 📅 Select Historical Date")
     selected_backtest_date = st.sidebar.date_input("Backtest Date", value=datetime.date.today() - datetime.timedelta(days=7))
     st.sidebar.caption(f"Testing for market condition on: **{selected_backtest_date}**")
+    
+    tgt_exp = st.sidebar.text_input("Manual Expiry Date (e.g. 24SEP2026)", value="24SEP2026").upper()
+else:
+    tgt_exp = st.sidebar.selectbox("Expiry Date", options=exps, index=0, key=exp_key)
 
-tgt_exp = st.sidebar.selectbox("Expiry Date", options=exps, index=0, key=exp_key)
 lot_size = st.sidebar.number_input("Lot Size", value=c_lot)
 dte = st.sidebar.number_input("Days to Expiry", value=3)
 
