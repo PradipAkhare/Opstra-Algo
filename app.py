@@ -3,9 +3,18 @@ import plotly.graph_objects as go
 from SmartApi import SmartConnect
 
 # ==========================================
-# 1. PAGE SETUP & LOGIN
+# 1. PAGE SETUP & LOGIN (WIDE MODE + CSS)
 # ==========================================
 st.set_page_config(page_title="Opstra Clone", layout="wide")
+
+# 👇 CSS TO EXPAND TABLE WIDTH & REMOVE CONSTRAINTS 👇
+st.markdown("""
+    <style>
+    .block-container { max-width: 98% !important; padding-top: 1rem; padding-bottom: 1rem; }
+    dataframe { width: 100% !important; }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("🚀 Opstra Clone: Universal Pro Dashboard")
 
 api_key, client_id, password, totp_secret = "A04oCs0I", "V551760", "2015", "4YILABJ5MTMUTRC45SUPNKANOU"
@@ -53,15 +62,13 @@ def get_token(sym, stk, typ, exp):
         f = f.sort_values('diff')
         return f.iloc[0]['token'], f.iloc[0]['symbol'], f.iloc[0]['exch_seg']
 
-# 👇 BUG FIXED: Safe LTP fetcher to prevent JSONDecodeError crashes 👇
 def safe_ltp(exch, sym, tok):
     try:
         res = api.ltpData(exch, sym, tok)
         if res and 'data' in res and 'ltp' in res['data']:
             return float(res['data']['ltp'])
-    except:
-        pass
-    return 100.0 # Fallback default value if API fails
+    except: pass
+    return 100.0
 
 def place_order(sym, tok, qty, side, exch="NFO"):
     try: return api.placeOrder({"variety":"NORMAL","tradingsymbol":sym,"symboltoken":tok,"transactiontype":side,"exchange":exch,"ordertype":"MARKET","producttype":"CARRYFORWARD","duration":"DAY","quantity":qty})
@@ -102,7 +109,7 @@ def get_pop(prices, pnls, S, T, v=0.15):
 # ==========================================
 st.sidebar.header("⚙️ Algo Settings")
 strat = st.sidebar.selectbox("📈 Select Strategy", ["Option Chain Builder ⛓️", "Custom Strategy Builder 🛠️", "Short Straddle (Naked Sell ⚠️)", "Iron Butterfly (Hedged Straddle 🛡️)", "Bullish Hedge (Long FUT + Buy PE)", "Bearish Hedge (Short FUT + Buy CE)"])
-sym_name = st.sidebar.selectbox("🔍 Search F&O Symbol (Type to Search)", options=unique_syms, index=def_idx).upper()
+sym_name = st.sidebar.selectbox("🔍 Search F&O Symbol", options=unique_syms, index=def_idx).upper()
 
 sym_df = fno_df[fno_df['name']==sym_name]
 if not sym_df.empty:
@@ -125,12 +132,10 @@ sm_stks = {"NIFTY":24000, "BANKNIFTY":51000, "FINNIFTY":23000, "SENSEX":80000, "
 if sym_name in sm_stks: c_stk = sm_stks[sym_name]
 
 st.sidebar.markdown("### 🔍 Asset Settings")
-stk_key = f"stk_{sym_name}_{strat}"
-exp_key = f"exp_{sym_name}_{strat}"
-step_key = f"step_{sym_name}_{strat}"
+stk_key, exp_key, step_key = f"stk_{sym_name}_{strat}", f"exp_{sym_name}_{strat}", f"step_{sym_name}_{strat}"
 
 tgt_stk = st.sidebar.number_input("Center Strike (ATM)", value=c_stk, step=c_step, key=stk_key)
-stk_step = st.sidebar.number_input("Strike Step (Difference)", value=max(c_step, 10), key=step_key)
+stk_step = st.sidebar.number_input("Strike Step", value=max(c_step, 10), key=step_key)
 tgt_exp = st.sidebar.selectbox("Expiry Date", options=exps, index=0, key=exp_key)
 lot_size = st.sidebar.number_input("Lot Size", value=c_lot)
 dte = st.sidebar.number_input("Days to Expiry", value=3)
@@ -138,13 +143,13 @@ dte = st.sidebar.number_input("Days to Expiry", value=3)
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛡️ Risk Management")
 m_loss = st.sidebar.number_input("Overall Max Loss (₹)", value=-500)
-tsl_act = st.sidebar.number_input("Activate Trailing SL after Profit (₹)", value=500)
+tsl_act = st.sidebar.number_input("Trailing SL Activate (₹)", value=500)
 tsl_trl = st.sidebar.number_input("Trail SL by (₹)", value=200)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🎯 Leg-Wise Settings")
-sl_p = st.sidebar.number_input("Individual Leg SL (%)", 10, 200, 50, step=10)
-tgt_p = st.sidebar.number_input("Individual Leg Target (%)", 10, 100, 90, step=10)
+sl_p = st.sidebar.number_input("Leg SL (%)", 10, 200, 50, step=10)
+tgt_p = st.sidebar.number_input("Leg Target (%)", 10, 100, 90, step=10)
 start = st.sidebar.button("▶️ START LIVE ALGO")
 
 # ==========================================
@@ -152,8 +157,7 @@ start = st.sidebar.button("▶️ START LIVE ALGO")
 # ==========================================
 est_mgn, legs = 0, []
 
-if "Option Chain" in strat:
-    pass
+if "Option Chain" in strat: pass
 elif "Custom" in strat:
     st.sidebar.markdown("### 🛠️ Build Your Own Strategy")
     nl = st.sidebar.number_input("Kitne Legs chahiye?", 1, 6, 2)
@@ -178,7 +182,7 @@ else: legs = [("FUT","SELL",0),("CE","BUY",0)]; est_mgn=45000
 est_mgn = (lot_size/25)*est_mgn
 
 # ==========================================
-# 5. PRE-TRADE ANALYSIS & PAYOFF GRAPH (TOP)
+# 5. PAYOFF GRAPH (TOP)
 # ==========================================
 ld, aok = [], True
 if "Option Chain" not in strat and legs:
@@ -188,9 +192,7 @@ if "Option Chain" not in strat and legs:
         else: aok = False
 
     if aok and ld:
-        for l in ld:
-            l['e'] = safe_ltp(l['ex'], l['sm'], l['tk'])
-        
+        for l in ld: l['e'] = safe_ltp(l['ex'], l['sm'], l['tk'])
         pxs = list(range(int(tgt_stk*0.85), int(tgt_stk*1.15), max(1, int(tgt_stk*0.3/200))))
         pe, pt0 = [], []
         for p in pxs:
@@ -203,27 +205,26 @@ if "Option Chain" not in strat and legs:
         with st.expander("📊 Pre-Trade Analysis & Payoff Graph", expanded=True):
             pop = get_pop(pxs, pt0, tgt_stk, dte) if ld else 0.0
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Est. Margin Required", f"₹ {est_mgn:,.0f}")
-            m2.metric("Max Profit (At Expiry)", "Unlimited 🚀" if (pe[-1]-pe[-2]>1 or pe[0]-pe[1]>1) else f"₹ {max(pe):.2f}")
-            m3.metric("Max Loss (At Expiry)", "Unlimited ⚠️" if (pe[-1]-pe[-2]<-1 or pe[0]-pe[1]<-1) else f"₹ {min(pe):.2f}")
-            m4.metric("Probability of Profit", f"{pop} %")
+            m1.metric("Est. Margin", f"₹ {est_mgn:,.0f}")
+            m2.metric("Max Profit", "Unlimited 🚀" if (pe[-1]-pe[-2]>1 or pe[0]-pe[1]>1) else f"₹ {max(pe):.2f}")
+            m3.metric("Max Loss", "Unlimited ⚠️" if (pe[-1]-pe[-2]<-1 or pe[0]-pe[1]<-1) else f"₹ {min(pe):.2f}")
+            m4.metric("POP", f"{pop} %")
             
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=pxs, y=[x if x>=0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(0,128,0,0.3)', showlegend=False))
             fig.add_trace(go.Scatter(x=pxs, y=[x if x<0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(255,0,0,0.3)', showlegend=False))
-            fig.add_trace(go.Scatter(x=pxs, y=pe, mode='lines', name='Expiry Payoff', line=dict(color='blue', dash='dash')))
-            fig.add_trace(go.Scatter(x=pxs, y=pt0, mode='lines', name='T+0 Payoff', line=dict(color='darkorange', width=3)))
-            fig.add_vline(x=tgt_stk, line_dash="dot", line_color="red", annotation_text="Strike")
+            fig.add_trace(go.Scatter(x=pxs, y=pe, mode='lines', name='Expiry', line=dict(color='blue', dash='dash')))
+            fig.add_trace(go.Scatter(x=pxs, y=pt0, mode='lines', name='T+0', line=dict(color='darkorange', width=3)))
+            fig.add_vline(x=tgt_stk, line_dash="dot", line_color="red")
             fig.add_hline(y=0, line_color="black")
             st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
-# 6. OPTION CHAIN BUILDER SECTION
+# 6. OPTION CHAIN BUILDER (ALL COLUMNS VISIBLE)
 # ==========================================
 if "Option Chain" in strat:
     with st.expander(f"⛓️ {sym_name} Option Chain", expanded=True):
-        st.markdown(f"#### 📍 {sym_name} is currently at: **{tgt_stk} (ATM)**")
-        st.caption("☑️ Checkboxes par tick karein aur Strategy banayein!")
+        st.markdown(f"#### 📍 {sym_name} ATM: **{tgt_stk}**")
         ch_data = []
         for s in range(int(tgt_stk - 10*stk_step), int(tgt_stk + 11*stk_step), int(stk_step)):
             if s <= 0: continue
@@ -231,20 +232,21 @@ if "Option Chain" in strat:
             pd_d, pt, pv = bs_greeks(tgt_stk, s, dte, "PE")
             cp, pp = round(bs_price(tgt_stk, s, dte, "CE"),2), round(bs_price(tgt_stk, s, dte, "PE"),2)
             oi = int(100000*math.exp(-((s-tgt_stk)**2)/100000))
-            ch_data.append({"Buy CE":False, "Sell CE":False, "CE Price":cp, "CE Trend":"🔴 Short Buildup" if s>=tgt_stk else "🚀 Short Covering", "CE OI":oi, "CE Theta":ct, "CE Delta":cd, "Spot":"🎯 ATM" if s==tgt_stk else "", "STRIKE":s, "PE Delta":pd_d, "PE Theta":pt, "PE OI":oi, "PE Trend":"🟢 Long Buildup" if s>tgt_stk else "🔴 Short Buildup", "PE Price":pp, "Buy PE":False, "Sell PE":False})
+            ch_data.append({"Buy CE":False, "Sell CE":False, "CE Pr":cp, "CE Trnd":"🔴 Sell" if s>=tgt_stk else "🚀 Buy", "CE OI":oi, "CE Th":ct, "CE Dl":cd, "Spot":"ATM" if s==tgt_stk else "", "STRIKE":s, "PE Dl":pd_d, "PE Th":pt, "PE OI":oi, "PE Trnd":"🟢 Buy" if s>tgt_stk else "🔴 Sell", "PE Pr":pp, "Buy PE":False, "Sell PE":False})
         
         df_ch = pd.DataFrame(ch_data)
         def style_ch(row):
             res = []
             for c in df_ch.columns:
-                if row['STRIKE']==tgt_stk: res.append('background-color:rgba(255,215,0,0.2);font-weight:bold;border-top:1px solid #FFD700;border-bottom:1px solid #FFD700;')
-                elif row['STRIKE']<tgt_stk and 'CE' in c: res.append('background-color:rgba(135,206,250,0.08);')
-                elif row['STRIKE']>tgt_stk and 'PE' in c: res.append('background-color:rgba(135,206,250,0.08);')
+                if row['STRIKE']==tgt_stk: res.append('background-color:rgba(255,215,0,0.2);font-weight:bold;')
+                elif row['STRIKE']<tgt_stk and 'CE' in c: res.append('background-color:rgba(135,206,250,0.06);')
+                elif row['STRIKE']>tgt_stk and 'PE' in c: res.append('background-color:rgba(135,206,250,0.06);')
                 else: res.append('')
             return res
 
         if not df_ch.empty:
-            ed_ch = st.data_editor(df_ch.style.apply(style_ch, axis=1), hide_index=True, use_container_width=True, column_config={"Spot": st.column_config.TextColumn("📍 Spot", width="small"), "STRIKE": st.column_config.NumberColumn("🎯 STRIKE", required=True), "Buy CE": st.column_config.CheckboxColumn("🟢 Buy CE"), "Sell CE": st.column_config.CheckboxColumn("🔴 Sell CE"), "CE Price": st.column_config.NumberColumn("₹ CE Price", format="%.2f"), "CE Trend": st.column_config.TextColumn("📈 CE Trend"), "CE OI": st.column_config.ProgressColumn("📊 CE OI Bar", format="%d", min_value=0, max_value=100000), "PE OI": st.column_config.ProgressColumn("📊 PE OI Bar", format="%d", min_value=0, max_value=100000), "PE Trend": st.column_config.TextColumn("📉 PE Trend"), "PE Price": st.column_config.NumberColumn("₹ PE Price", format="%.2f"), "Buy PE": st.column_config.CheckboxColumn("🟢 Buy PE"), "Sell PE": st.column_config.CheckboxColumn("🔴 Sell PE")})
+            # 👇 FULL WIDTH WIDE DATA EDITOR TO SHOW ALL COLUMNS 👇
+            ed_ch = st.data_editor(df_ch.style.apply(style_ch, axis=1), hide_index=True, use_container_width=True)
             hs, hb = False, False
             for _, r in ed_ch.iterrows():
                 off = int(r['STRIKE']) - tgt_stk
@@ -274,17 +276,17 @@ if "Option Chain" in strat:
                     st.markdown("---")
                     pop = get_pop(pxs, pt0, tgt_stk, dte)
                     m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Est. Margin Required", f"₹ {est_mgn:,.0f}")
-                    m2.metric("Max Profit (At Expiry)", "Unlimited 🚀" if (pe[-1]-pe[-2]>1 or pe[0]-pe[1]>1) else f"₹ {max(pe):.2f}")
-                    m3.metric("Max Loss (At Expiry)", "Unlimited ⚠️" if (pe[-1]-pe[-2]<-1 or pe[0]-pe[1]<-1) else f"₹ {min(pe):.2f}")
-                    m4.metric("Probability of Profit", f"{pop} %")
+                    m1.metric("Est. Margin", f"₹ {est_mgn:,.0f}")
+                    m2.metric("Max Profit", "Unlimited 🚀" if (pe[-1]-pe[-2]>1 or pe[0]-pe[1]>1) else f"₹ {max(pe):.2f}")
+                    m3.metric("Max Loss", "Unlimited ⚠️" if (pe[-1]-pe[-2]<-1 or pe[0]-pe[1]<-1) else f"₹ {min(pe):.2f}")
+                    m4.metric("POP", f"{pop} %")
                     
                     fig = go.Figure()
                     fig.add_trace(go.Scatter(x=pxs, y=[x if x>=0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(0,128,0,0.3)', showlegend=False))
                     fig.add_trace(go.Scatter(x=pxs, y=[x if x<0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(255,0,0,0.3)', showlegend=False))
-                    fig.add_trace(go.Scatter(x=pxs, y=pe, mode='lines', name='Expiry Payoff', line=dict(color='blue', dash='dash')))
-                    fig.add_trace(go.Scatter(x=pxs, y=pt0, mode='lines', name='T+0 Payoff', line=dict(color='darkorange', width=3)))
-                    fig.add_vline(x=tgt_stk, line_dash="dot", line_color="red", annotation_text="Strike")
+                    fig.add_trace(go.Scatter(x=pxs, y=pe, mode='lines', name='Expiry', line=dict(color='blue', dash='dash')))
+                    fig.add_trace(go.Scatter(x=pxs, y=pt0, mode='lines', name='T+0', line=dict(color='darkorange', width=3)))
+                    fig.add_vline(x=tgt_stk, line_dash="dot", line_color="red")
                     fig.add_hline(y=0, line_color="black")
                     st.plotly_chart(fig, use_container_width=True)
 
