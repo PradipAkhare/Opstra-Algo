@@ -49,13 +49,10 @@ if smartApi is None:
 st.sidebar.success("✅ Login Successful!")
 df = get_instrument_df()
 
+# ==========================================
+# 3. HELPER FUNCTIONS (API ORDERS & GREEKS)
+# ==========================================
 def get_token_info(symbol, strike_price, option_type, expiry):
-    filtered_df = df[(df['exch_seg'] == 'NFO') & 
-                     (df['name'] == symbol) & 
-                     (df['strike'] == str(strike_price * 100) + '.000000') & 
-                     (df['symbol'].str.endswith(option_type)) & 
-                     (df['expiry'] == expiry)]
-   def get_token_info(symbol, strike_price, option_type, expiry):
     filtered_df = df[(df['exch_seg'] == 'NFO') & 
                      (df['name'] == symbol) & 
                      (df['strike'] == str(strike_price * 100) + '.000000') & 
@@ -100,23 +97,7 @@ def place_new_sell_order(symbol, token, qty):
         return orderId
     except Exception as e:
         return f"Error: {e}"
-        orderparams = {
-            "variety": "NORMAL",
-            "tradingsymbol": symbol,
-            "symboltoken": token,
-            "transactiontype": "SELL", 
-            "exchange": "NFO",
-            "ordertype": "MARKET",
-            "producttype": "CARRYFORWARD", 
-            "duration": "DAY",
-            "quantity": qty
-        }
-        orderId = smartApi.placeOrder(orderparams)
-        return orderId
-    except Exception as e:
-        return f"Error: {e}"
 
-# 👇 OPTION GREEKS CALCULATION 👇
 def black_scholes_greeks(S, K, T_days, opt_type="CE", r=0.10, v=0.15):
     T = max(T_days / 365.0, 0.001) 
     d1 = (math.log(S / K) + (r + 0.5 * v**2) * T) / (v * math.sqrt(T))
@@ -135,7 +116,6 @@ def black_scholes_greeks(S, K, T_days, opt_type="CE", r=0.10, v=0.15):
     vega = (S * pdf(d1) * math.sqrt(T)) / 100
     return round(delta, 2), round(theta / 365, 2), round(vega, 2)
 
-# 👇 T+0 PAYOFF KE LIYE OPTION PRICE CALCULATOR 👇
 def bs_price(S, K, T_days, opt_type="CE", r=0.10, v=0.15):
     if T_days <= 0:
         return max(0, S - K) if opt_type == "CE" else max(0, K - S)
@@ -147,7 +127,7 @@ def bs_price(S, K, T_days, opt_type="CE", r=0.10, v=0.15):
     else: return K * math.exp(-r * T) * cdf(-d2) - S * cdf(-d1)
 
 # ==========================================
-# 3. SIDEBAR SETTINGS (User Input UI)
+# 4. SIDEBAR SETTINGS (User Input UI)
 # ==========================================
 st.sidebar.header("⚙️ Algo Settings")
 target_strike = st.sidebar.number_input("Strike Price", value=25000, step=50)
@@ -169,7 +149,7 @@ leg_target_percent = st.sidebar.number_input("Individual Leg Target (%)", 10, 10
 start_algo = st.sidebar.button("▶️ START LIVE ALGO")
 
 # ==========================================
-# 4. MAIN DASHBOARD LOGIC
+# 5. MAIN DASHBOARD LOGIC
 # ==========================================
 if start_algo:
     ce_token, ce_symbol = get_token_info("NIFTY", target_strike, "CE", target_expiry)
@@ -205,30 +185,26 @@ if start_algo:
             
         fig = go.Figure()
         
-        # 1. Profit Area (Green)
+        # Profit Area (Green)
         pnl_profit = [p if p >= 0 else 0 for p in pnl_expiry]
-        fig.add_trace(go.Scatter(x=prices, y=pnl_profit, mode='none', 
-                                 fill='tozeroy', fillcolor='rgba(0, 128, 0, 0.3)', showlegend=False))
+        fig.add_trace(go.Scatter(x=prices, y=pnl_profit, mode='none', fill='tozeroy', fillcolor='rgba(0, 128, 0, 0.3)', showlegend=False))
                                  
-        # 2. Loss Area (Red)
+        # Loss Area (Red)
         pnl_loss = [p if p < 0 else 0 for p in pnl_expiry]
-        fig.add_trace(go.Scatter(x=prices, y=pnl_loss, mode='none', 
-                                 fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.3)', showlegend=False))
+        fig.add_trace(go.Scatter(x=prices, y=pnl_loss, mode='none', fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.3)', showlegend=False))
 
-        # 3. Expiry Line (Dashed Blue)
-        fig.add_trace(go.Scatter(x=prices, y=pnl_expiry, mode='lines', name='Expiry Payoff', 
-                                 line=dict(color='blue', dash='dash')))
+        # Expiry Line (Dashed Blue)
+        fig.add_trace(go.Scatter(x=prices, y=pnl_expiry, mode='lines', name='Expiry Payoff', line=dict(color='blue', dash='dash')))
                                  
-        # 4. T+0 Line (Solid Orange)
-        fig.add_trace(go.Scatter(x=prices, y=pnl_t0, mode='lines', name='T+0 Payoff (Today)', 
-                                 line=dict(color='darkorange', width=3)))
+        # T+0 Line (Solid Orange)
+        fig.add_trace(go.Scatter(x=prices, y=pnl_t0, mode='lines', name='T+0 Payoff (Today)', line=dict(color='darkorange', width=3)))
                                  
-        fig.update_layout(hovermode="x unified", xaxis_title="Nifty Price", yaxis_title="P&L (₹)",
-                          title="Cursor ghumayein aur P&L dekhein (T+0 vs Expiry)")
+        fig.update_layout(hovermode="x unified", xaxis_title="Nifty Price", yaxis_title="P&L (₹)", title="Cursor ghumayein aur P&L dekhein (T+0 vs Expiry)")
         fig.add_vline(x=target_strike, line_dash="dot", line_color="red", annotation_text="Strike")
         fig.add_hline(y=0, line_color="black")
         
         st.plotly_chart(fig, use_container_width=True)
+        
         # --- LIVE P&L TRACKER UI ---
         st.markdown("---")
         st.subheader("⚡ Live MTM & Option Greeks")
@@ -253,13 +229,12 @@ if start_algo:
 
         ce_active = True
         pe_active = True
-        max_pnl_seen = 0 # Trailing SL ke liye variable
+        max_pnl_seen = 0 
         
         # Live Update Loop
         while True:
             live_ce = smartApi.ltpData("NFO", ce_symbol, ce_token)['data']['ltp']
             live_pe = smartApi.ltpData("NFO", pe_symbol, pe_token)['data']['ltp']
-            live_prem = live_ce + live_pe
             
             pnl = 0
             if ce_active: pnl += (entry_ce - live_ce) * lot_size
@@ -280,105 +255,4 @@ if start_algo:
             theta_metric.metric(label="Total Theta (Time Decay)", value=f"₹ {round(total_theta * lot_size, 2)} / day")
             vega_metric.metric(label="Total Vega (Vol Impact)", value=round(total_vega, 2))
             
-            # 👇 SMART TRAILING STOP LOSS (TSL) 👇
-            if pnl > max_pnl_seen:
-                max_pnl_seen = pnl
-                
-            if max_pnl_seen >= tsl_activation:
-                dynamic_sl = max_pnl_seen - tsl_trail_by
-                if pnl <= dynamic_sl:
-                    status_msg.error(f"🛡️ TRAILING SL HIT! Protected Profit at ₹{round(pnl, 2)}. Squaring off...")
-                    if ce_active: place_exit_order(ce_symbol, ce_token, lot_size)
-                    if pe_active: place_exit_order(pe_symbol, pe_token, lot_size)
-                    break
-
-        # 👇 SMART ROLLING ADJUSTMENT (NAYA LEG SELL KARNA) 👇
-            if ce_active:
-                if live_ce >= ce_sl_price:
-                    st.toast(f"⚠️ CE Stop Loss Hit at ₹{live_ce}! Adjusting Position...")
-                    
-                    # 1. Loss wale CE ko kaato
-                    place_exit_order(ce_symbol, ce_token, lot_size)
-                    ce_active = False 
-                    
-                    # 2. Profit wale PE ko bhi book kar lo (Taaki balance bane)
-                    if pe_active:
-                        place_exit_order(pe_symbol, pe_token, lot_size)
-                        pe_active = False
-                        st.toast(f"🔄 PE also booked to roll up!")
-                    
-                    # 3. NAYA PE SELL KARNA (Nifty jahan gaya hai, wahan ka)
-                    new_strike = target_strike + 500  # 500 point upar shift kiya
-                    new_pe_token, new_pe_symbol = get_token_info("NIFTY", new_strike, "PE", target_expiry)
-                    
-                    if new_pe_token:
-                        place_new_sell_order(new_pe_symbol, new_pe_token, lot_size)
-                        st.toast(f"✅ Rolled Up: Sold Naya Put {new_strike} PE!")
-                        
-                        # Naye PE ki details update kardo taaki loop aage chalta rahe
-                        pe_active = True
-                        pe_symbol = new_pe_symbol
-                        pe_token = new_pe_token
-                        
-                        # Naye PE ka naya SL aur Target set kar do
-                        live_new_pe = smartApi.ltpData("NFO", pe_symbol, pe_token)['data']['ltp']
-                        pe_sl_price = live_new_pe * (1 + (leg_sl_percent / 100))
-                        pe_target_price = live_new_pe * (1 - (leg_target_percent / 100))
-                        
-                elif live_ce <= ce_target_price:
-                    st.toast(f"🎯 CE Target Hit (90% Profit)! Exiting CE...")
-                    place_exit_order(ce_symbol, ce_token, lot_size)
-                    ce_active = False 
-
-            if pe_active:
-                if live_pe >= pe_sl_price:
-                    st.toast(f"⚠️ PE Stop Loss Hit at ₹{live_pe}! Adjusting Position...")
-                    
-                    # 1. Loss wale PE ko kaato
-                    place_exit_order(pe_symbol, pe_token, lot_size)
-                    pe_active = False 
-                    
-                    # 2. Profit wale CE ko bhi book kar lo
-                    if ce_active:
-                        place_exit_order(ce_symbol, ce_token, lot_size)
-                        ce_active = False
-                        st.toast(f"🔄 CE also booked to roll down!")
-                    
-                    # 3. NAYA CE SELL KARNA
-                    new_strike = target_strike - 500  # 500 point neeche shift kiya
-                    new_ce_token, new_ce_symbol = get_token_info("NIFTY", new_strike, "CE", target_expiry)
-                    
-                    if new_ce_token:
-                        place_new_sell_order(new_ce_symbol, new_ce_token, lot_size)
-                        st.toast(f"✅ Rolled Down: Sold Naya Call {new_strike} CE!")
-                        
-                        # Naye CE ki details update
-                        ce_active = True
-                        ce_symbol = new_ce_symbol
-                        ce_token = new_ce_token
-                        
-                        # Naye CE ka SL aur Target
-                        live_new_ce = smartApi.ltpData("NFO", ce_symbol, ce_token)['data']['ltp']
-                        ce_sl_price = live_new_ce * (1 + (leg_sl_percent / 100))
-                        ce_target_price = live_new_ce * (1 - (leg_target_percent / 100))
-                        
-                elif live_pe <= pe_target_price:
-                    st.toast(f"🎯 PE Target Hit (90% Profit)! Exiting PE...")
-                    place_exit_order(pe_symbol, pe_token, lot_size)
-                    pe_active = False 
-                
-            if not ce_active and not pe_active:
-                status_msg.error("🛑 Both legs squared off. Algo stopped.")
-                break
-                
-            # Total Max Loss Check
-            if pnl <= max_loss:
-                status_msg.error(f"⚠️ TOTAL MAX LOSS HIT! (-₹{abs(round(pnl,2))}) Squaring off all...")
-                if ce_active: place_exit_order(ce_symbol, ce_token, lot_size)
-                if pe_active: place_exit_order(pe_symbol, pe_token, lot_size)
-                break
-                
-            time.sleep(1)
-            
-    else:
-        st.error("❌ Token nahi mila. Kripya Expiry date check karein.")   
+            # 👇 SMART TRAILING STOP LOSS (TS
