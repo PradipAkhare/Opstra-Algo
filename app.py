@@ -125,6 +125,35 @@ def bs_price(S, K, T_days, opt_type="CE", r=0.10, v=0.15):
     def cdf(x): return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
     if opt_type == "CE": return S * cdf(d1) - K * math.exp(-r * T) * cdf(d2)
     else: return K * math.exp(-r * T) * cdf(-d2) - S * cdf(-d1)
+def bs_price(S, K, T_days, opt_type="CE", r=0.10, v=0.15):
+    if T_days <= 0:
+        return max(0, S - K) if opt_type == "CE" else max(0, K - S)
+    T = T_days / 365.0
+    d1 = (math.log(S / K) + (r + 0.5 * v**2) * T) / (v * math.sqrt(T))
+    d2 = d1 - v * math.sqrt(T)
+    def cdf(x): return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
+    if opt_type == "CE": return S * cdf(d1) - K * math.exp(-r * T) * cdf(d2)
+    else: return K * math.exp(-r * T) * cdf(-d2) - S * cdf(-d1)
+
+# 👇 ESTIMATED MARGIN CALCULATOR 👇
+def estimate_margin(lot_size):
+    # Nifty ke 1 Lot (25 qty) Short Straddle mein lagbhag ₹1,30,000 lagte hain
+    return (lot_size / 25) * 130000
+
+# 👇 PROBABILITY OF PROFIT (POP) CALCULATOR 👇
+def calculate_pop(S, premium, T_days, r=0.10, v=0.15):
+    T = max(T_days / 365.0, 0.001)
+    LBE = S - premium  # Lower Break-Even
+    UBE = S + premium  # Upper Break-Even
+    
+    d2_upper = (math.log(S / UBE) + (r - 0.5 * v**2) * T) / (v * math.sqrt(T))
+    d2_lower = (math.log(S / LBE) + (r - 0.5 * v**2) * T) / (v * math.sqrt(T))
+    
+    def cdf(x): return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
+    
+    # Probability of Nifty staying between Lower and Upper Break-Even
+    pop = cdf(d2_lower) - cdf(d2_upper)
+    return round(pop * 100, 2)
 
 # ==========================================
 # 4. SIDEBAR SETTINGS (User Input UI)
@@ -164,7 +193,18 @@ if start_algo:
         entry_pe = pe_data['data']['ltp']
         entry_prem = entry_ce + entry_pe
         
-        st.success(f"✅ Position Executed! Total Premium Collected: ₹{round(entry_prem, 2)}")
+       st.success("✅ Orders Placed Successfully!")
+        
+        # --- TRADE SUMMARY METRICS ---
+        pop_value = calculate_pop(target_strike, entry_prem, days_to_expiry)
+        est_margin = estimate_margin(lot_size)
+        max_profit = entry_prem * lot_size
+        
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        m_col1.metric("Est. Margin Required", f"₹ {est_margin:,.0f}")
+        m_col2.metric("Total Premium Collected", f"₹ {round(entry_prem, 2)}")
+        m_col3.metric("Max Profit (At Expiry)", f"₹ {round(max_profit, 2)}")
+        m_col4.metric("Probability of Profit (POP)", f"{pop_value} %")
         
         # --- INTERACTIVE GRAPH DRAW KARNA (PLOTLY) ---
         st.subheader("📉 Expiry & T+0 Payoff Graph")
