@@ -301,23 +301,25 @@ else:
 
 # Multiply base margin estimate by lots
 est_margin = (lot_size/25) * est_margin
+
 # ==========================================
 # 6. MAIN DASHBOARD LOGIC 
 # ==========================================
 leg_data = []
 all_tokens_found = True
 
-for l_type, l_side, l_off in legs_config:
-    l_strike = target_strike + l_off
-    tok, sym = get_token_info("NIFTY", l_strike, l_type, target_expiry)
-    if tok:
-        leg_data.append({"type": l_type, "side": l_side, "strike": l_strike, "token": tok, "symbol": sym, "active": True})
-    else:
-        all_tokens_found = False
+if len(legs_config) > 0:
+    for l_type, l_side, l_off in legs_config:
+        l_strike = target_strike + l_off
+        tok, sym = get_token_info("NIFTY", l_strike, l_type, target_expiry)
+        if tok:
+            leg_data.append({"type": l_type, "side": l_side, "strike": l_strike, "token": tok, "symbol": sym, "active": True})
+        else:
+            all_tokens_found = False
 
-if all_tokens_found:
-    
-   # --- PART 1: PRE-TRADE ANALYSIS ---
+    if all_tokens_found:
+        
+        # --- PART 1: PRE-TRADE ANALYSIS ---
         for leg in leg_data:
             leg["entry"] = smartApi.ltpData("NFO", leg["symbol"], leg["token"])['data']['ltp']
             leg["sl"], leg["tgt"] = get_exit_prices(leg["entry"], leg["side"], leg_sl_percent, leg_target_percent)
