@@ -14,7 +14,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Opstra Clone: Universal Pro Dashboard + Live Time & Payoff Graph")
+st.title("🚀 Opstra Clone: Universal Pro Dashboard + Auto Expiry & Payoff Graph")
 
 api_key, client_id, password, totp_secret = "A04oCs0I", "V551760", "2015", "4YILABJ5MTMUTRC45SUPNKANOU"
 
@@ -113,6 +113,7 @@ strat = st.sidebar.selectbox("📈 Select Strategy", ["Option Chain Builder ⛓�
 sym_name = st.sidebar.selectbox("🔍 Search F&O Symbol", options=unique_syms, index=def_idx).upper()
 
 sym_df = fno_df[fno_df['name']==sym_name]
+exps = []
 if not sym_df.empty:
     opt_df = sym_df[sym_df['symbol'].str.endswith('CE') | sym_df['symbol'].str.endswith('PE')]
     if not opt_df.empty:
@@ -138,11 +139,23 @@ stk_key, exp_key, step_key = f"stk_{sym_name}_{strat}", f"exp_{sym_name}_{strat}
 tgt_stk = st.sidebar.number_input("Center Strike (ATM)", value=c_stk, step=c_step, key=stk_key)
 stk_step = st.sidebar.number_input("Strike Step", value=max(c_step, 10), key=step_key)
 
+# 👇 AUTO-CALCULATE NEXT EXPIRY BASED ON SELECTED BACKTEST DATE 👇
 if "Backtest" in mode:
     st.sidebar.markdown("### 📅 Select Historical Date")
     selected_backtest_date = st.sidebar.date_input("Backtest Date", value=datetime.date.today() - datetime.timedelta(days=7))
-    st.sidebar.caption(f"Testing for market condition on: **{selected_backtest_date}**")
-    tgt_exp = st.sidebar.text_input("Manual Expiry Date (e.g. 24SEP2026)", value="24SEP2026").upper()
+    
+    # Automatically find the next nearest expiry from the selected backtest date
+    auto_exp_str = "24SEP2026"
+    if exps:
+        dt_selected = pd.to_datetime(selected_backtest_date)
+        future_exps = [e for e in exps if parse_exp(e) >= dt_selected]
+        if future_exps:
+            auto_exp_str = future_exps[0]
+        else:
+            auto_exp_str = exps[-1]
+
+    tgt_exp = st.sidebar.text_input("Auto-Detected / Manual Expiry", value=auto_exp_str).upper()
+    st.sidebar.caption(f"Testing on: **{selected_backtest_date}** | Expiry: **{tgt_exp}**")
 else:
     tgt_exp = st.sidebar.selectbox("Expiry Date", options=exps, index=0, key=exp_key)
 
@@ -310,17 +323,12 @@ if start:
                 
             adj_logs = []
             with st.expander("⚡ Live MTM, Time Clock, Adjustments & Dynamic Graph", expanded=True):
-                # Live Clock Placeholder at Top of Execution
                 clock_placeholder = st.empty()
-                
                 cs = st.columns(len(ld))
                 lms = [cs[i].empty() for i in range(len(ld))]
                 g1, g2, g3, g4 = st.columns(4)
                 pm, dm, tm, vm, msg = g1.empty(), g2.empty(), g3.empty(), g4.empty(), st.empty()
-                
-                # Dynamic Payoff Graph Placeholder inside Execution
                 graph_placeholder = st.empty()
-                
                 mpnl = 0
                 for step in range(5):
                     curr_time = time.strftime("%H:%M:%S")
@@ -343,7 +351,6 @@ if start:
                     tm.metric("Total Theta", f"₹ {tt*lot_size:.2f}/day")
                     vm.metric("Total Vega", f"{tv:.2f}")
                     
-                    # Check for adjustments and redraw dynamic graph after adjustment
                     if "Naked Sell" in strat and len(ld)>=2:
                         ce, pe_l = ld[0], ld[1]
                         if ce['a'] and ce['l']>=ce['sl']:
@@ -361,7 +368,6 @@ if start:
                             if n_tk:
                                 ld.append({"t": "CE", "s": "SELL", "k": n_stk, "tk": n_tk, "sm": n_sm, "a": True, "ex": n_ex, "e": 50.0, "sl": 75.0, "tg": 5.0})
                     
-                    # Render Live Updated Payoff Graph during execution/adjustments
                     pxs = list(range(int(tgt_stk*0.85), int(tgt_stk*1.15), max(1, int(tgt_stk*0.3/200))))
                     pe, pt0 = [], []
                     for p in pxs:
