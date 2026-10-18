@@ -14,7 +14,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Opstra Clone: Pro Backtest Simulator with Safe Variable Initialization")
+st.title("🚀 Opstra Clone: Pro Backtest Simulator & Option Chain")
 
 api_key, client_id, password, totp_secret = "A04oCs0I", "V551760", "2015", "4YILABJ5MTMUTRC45SUPNKANOU"
 
@@ -130,7 +130,6 @@ else: all_exps, c_lot, c_step, c_stk = ["29DEC2026"], 25, 50, 25000
 sm_stks = {"NIFTY":24000, "BANKNIFTY":51000, "FINNIFTY":23000, "SENSEX":80000, "BANKEX":60000, "CRUDEOIL":6000, "GOLD":75000, "RELIANCE":3000}
 if sym_name in sm_stks: c_stk = sm_stks[sym_name]
 
-# Safe default values for simulator variables
 sim_step = 1
 sim_iv = 15.0
 sim_spot_shift = 0.0
