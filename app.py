@@ -173,6 +173,17 @@ if start_algo:
         vega_metric = g_col3.empty()
         
         status_msg = st.empty()
+        status_msg = st.empty()
+        
+        # 👇 Yahan SL aur Target ke prices set honge (Loop se pehle) 👇
+        ce_sl_price = entry_ce * (1 + (leg_sl_percent / 100))
+        pe_sl_price = entry_pe * (1 + (leg_sl_percent / 100))
+
+        ce_target_price = entry_ce * (1 - (leg_target_percent / 100))
+        pe_target_price = entry_pe * (1 - (leg_target_percent / 100))
+
+        ce_active = True
+        pe_active = True
         
         # Loop for live updates
         while True:
