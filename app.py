@@ -50,6 +50,11 @@ if smartApi is None:
 st.sidebar.success("✅ Login Successful!")
 df = get_instrument_df()
 
+# 👇 AUTOCOMPLETE SUGGESTION KE LIYE SARE SYMBOLS NIKALNA 👇
+fno_mcx_df = df[(df['exch_seg'] == 'NFO') | (df['exch_seg'] == 'MCX')]
+unique_symbols = sorted(fno_mcx_df['name'].dropna().unique().tolist())
+default_symbol_idx = unique_symbols.index("NIFTY") if "NIFTY" in unique_symbols else 0
+
 # ==========================================
 # 3. ADVANCED HELPER FUNCTIONS (MULTI-LEG)
 # ==========================================
@@ -151,7 +156,14 @@ strategy = st.sidebar.selectbox("📈 Select Strategy", [
 ])
 
 st.sidebar.markdown("### 🔍 Asset Settings")
-symbol_name = st.sidebar.text_input("F&O Symbol (e.g., NIFTY, BANKNIFTY, RELIANCE, CRUDEOIL)", value="NIFTY").upper()
+
+# 👇 NAYA AUTOCOMPLETE / SEARCHABLE BOX 👇
+symbol_name = st.sidebar.selectbox(
+    "🔍 Search F&O Symbol (Type to Search)", 
+    options=unique_symbols, 
+    index=default_symbol_idx
+).upper()
+
 target_strike = st.sidebar.number_input("Center Strike (ATM)", value=25000, step=50)
 strike_step = st.sidebar.number_input("Strike Step (Difference)", value=50, help="Nifty: 50, BankNifty: 100, Reliance: 20")
 target_expiry = st.sidebar.text_input("Expiry Date", value="29DEC2026")
@@ -216,14 +228,11 @@ if "Option Chain" in strategy:
             
         df_chain = pd.DataFrame(chain_data)
         
-        # 👇 HIGHLIGHT FUNCTION FOR ATM ROW 👇
         def color_atm_row(row):
             if row['Spot'] == '🎯 ATM':
-                # Golden/Blue Highlight Color for the whole row
                 return ['background-color: rgba(255, 215, 0, 0.15); font-weight: bold; border-top: 1px solid #FFD700; border-bottom: 1px solid #FFD700;'] * len(row)
             return [''] * len(row)
 
-        # Apply the style to DataFrame
         styled_chain = df_chain.style.apply(color_atm_row, axis=1)
         
         edited_chain = st.data_editor(
@@ -433,95 +442,4 @@ if len(legs_config) > 0:
                             d, t, v = get_greeks(target_strike, leg["strike"], days_to_expiry, leg["type"], leg["side"])
                             tot_d += d; tot_t += t; tot_v += v
                             
-                            leg_metrics[i].metric(label=f"🟢 {leg['side']} {leg['strike']} {leg['type']}", value=f"₹ {leg['live']}")
-                            
-                        pnl_metric.metric(label="Total MTM P&L", value=f"₹ {round(pnl, 2)}", delta=round(pnl, 2))
-                        delta_metric.metric(label="Total Delta", value=round(tot_d, 2))
-                        theta_metric.metric(label="Total Theta", value=f"₹ {round(tot_t * lot_size, 2)} / day")
-                        vega_metric.metric(label="Total Vega", value=round(tot_v, 2))
-                        
-                        if pnl > max_pnl_seen: max_pnl_seen = pnl
-                        if max_pnl_seen >= tsl_activation:
-                            dynamic_sl = max_pnl_seen - tsl_trail_by
-                            if pnl <= dynamic_sl:
-                                status_msg.error(f"🛡️ TRAILING SL HIT! Protected Profit at ₹{round(pnl, 2)}. Squaring off all...")
-                                for leg in leg_data:
-                                    if leg["active"]: place_order_api(leg["symbol"], leg["token"], lot_size, "SELL" if leg["side"]=="BUY" else "BUY")
-                                break
-
-                        if "Naked Sell" in strategy:
-                            ce_leg = leg_data[0]
-                            pe_leg = leg_data[1]
-                            
-                            if ce_leg["active"]:
-                                if ce_leg["live"] >= ce_leg["sl"]:
-                                    st.toast(f"⚠️ CE Stop Loss Hit! Adjusting...")
-                                    place_order_api(ce_leg["symbol"], ce_leg["token"], lot_size, "BUY")
-                                    ce_leg["active"] = False 
-                                    if pe_leg["active"]:
-                                        place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
-                                        pe_leg["active"] = False
-                                    
-                                    new_strike = target_strike + (10 * int(strike_step))
-                                    new_token, new_symbol = get_token_info(symbol_name, new_strike, "PE", target_expiry)
-                                    if new_token:
-                                        place_order_api(new_symbol, new_token, lot_size, "SELL")
-                                        pe_leg["active"] = True
-                                        pe_leg["symbol"] = new_symbol
-                                        pe_leg["token"] = new_token
-                                        pe_leg["strike"] = new_strike
-                                        pe_leg["live"] = smartApi.ltpData("NFO", new_symbol, new_token)['data']['ltp']
-                                        pe_leg["sl"], pe_leg["tgt"] = get_exit_prices(pe_leg["live"], "SELL", leg_sl_percent, leg_target_percent)
-                                elif ce_leg["live"] <= ce_leg["tgt"]:
-                                    place_order_api(ce_leg["symbol"], ce_leg["token"], lot_size, "BUY")
-                                    ce_leg["active"] = False 
-
-                            if pe_leg["active"]:
-                                if pe_leg["live"] >= pe_leg["sl"]:
-                                    st.toast(f"⚠️ PE Stop Loss Hit! Adjusting...")
-                                    place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
-                                    pe_leg["active"] = False 
-                                    if ce_leg["active"]:
-                                        place_order_api(ce_leg["symbol"], ce_leg["token"], lot_size, "BUY")
-                                        ce_leg["active"] = False
-                                    
-                                    new_strike = target_strike - (10 * int(strike_step)) 
-                                    new_token, new_symbol = get_token_info(symbol_name, new_strike, "CE", target_expiry)
-                                    if new_token:
-                                        place_order_api(new_symbol, new_token, lot_size, "SELL")
-                                        ce_leg["active"] = True
-                                        ce_leg["symbol"] = new_symbol
-                                        ce_leg["token"] = new_token
-                                        ce_leg["strike"] = new_strike
-                                        ce_leg["live"] = smartApi.ltpData("NFO", new_symbol, new_token)['data']['ltp']
-                                        ce_leg["sl"], ce_leg["tgt"] = get_exit_prices(ce_leg["live"], "SELL", leg_sl_percent, leg_target_percent)
-                                elif pe_leg["live"] <= pe_leg["tgt"]:
-                                    place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
-                                    pe_leg["active"] = False 
-                        else:
-                            all_closed = True
-                            for leg in leg_data:
-                                if leg["active"]:
-                                    all_closed = False
-                                    hit_sl, hit_tgt = check_exit(leg["live"], leg["side"], leg["sl"], leg["tgt"])
-                                    if hit_sl or hit_tgt:
-                                        st.toast(f"🔔 {leg['strike']} {leg['type']} Hit Target/SL!")
-                                        place_order_api(leg["symbol"], leg["token"], lot_size, "SELL" if leg["side"]=="BUY" else "BUY")
-                                        leg["active"] = False
-                            if all_closed:
-                                status_msg.error("🛑 All legs squared off. Algo stopped.")
-                                break
-                            
-                        if pnl <= max_loss:
-                            status_msg.error(f"⚠️ TOTAL MAX LOSS HIT! (-₹{abs(round(pnl,2))}) Squaring off all...")
-                            for leg in leg_data:
-                                if leg["active"]: place_order_api(leg["symbol"], leg["token"], lot_size, "SELL" if leg["side"]=="BUY" else "BUY")
-                            break
-                            
-                        time.sleep(1)
-                        
-    else:
-        st.warning(f"⚠️ {symbol_name} ka Token nahi mila. Kripya Expiry Date check karein (Jaise: 29DEC2026) ya Strike badlein.")
-else:
-    if "Option Chain" in strategy:
-        st.info("👆 Option Chain mein se koi leg select karein (Buy/Sell check box pe tick mark karein) taaki Payoff Graph dikh sake!")
+                            leg_metrics
