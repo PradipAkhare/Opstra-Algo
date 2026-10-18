@@ -271,24 +271,78 @@ if start_algo:
                     if pe_active: place_exit_order(pe_symbol, pe_token, lot_size)
                     break
 
-            # 👇 SMART AUTO ADJUSTMENT (LEG-WISE SL & TARGET) 👇
+        # 👇 SMART ROLLING ADJUSTMENT (NAYA LEG SELL KARNA) 👇
             if ce_active:
                 if live_ce >= ce_sl_price:
-                    st.toast(f"⚠️ CE Stop Loss Hit at ₹{live_ce}!")
+                    st.toast(f"⚠️ CE Stop Loss Hit at ₹{live_ce}! Adjusting Position...")
+                    
+                    # 1. Loss wale CE ko kaato
                     place_exit_order(ce_symbol, ce_token, lot_size)
                     ce_active = False 
+                    
+                    # 2. Profit wale PE ko bhi book kar lo (Taaki balance bane)
+                    if pe_active:
+                        place_exit_order(pe_symbol, pe_token, lot_size)
+                        pe_active = False
+                        st.toast(f"🔄 PE also booked to roll up!")
+                    
+                    # 3. NAYA PE SELL KARNA (Nifty jahan gaya hai, wahan ka)
+                    new_strike = target_strike + 500  # 500 point upar shift kiya
+                    new_pe_token, new_pe_symbol = get_token_info("NIFTY", new_strike, "PE", target_expiry)
+                    
+                    if new_pe_token:
+                        place_new_sell_order(new_pe_symbol, new_pe_token, lot_size)
+                        st.toast(f"✅ Rolled Up: Sold Naya Put {new_strike} PE!")
+                        
+                        # Naye PE ki details update kardo taaki loop aage chalta rahe
+                        pe_active = True
+                        pe_symbol = new_pe_symbol
+                        pe_token = new_pe_token
+                        
+                        # Naye PE ka naya SL aur Target set kar do
+                        live_new_pe = smartApi.ltpData("NFO", pe_symbol, pe_token)['data']['ltp']
+                        pe_sl_price = live_new_pe * (1 + (leg_sl_percent / 100))
+                        pe_target_price = live_new_pe * (1 - (leg_target_percent / 100))
+                        
                 elif live_ce <= ce_target_price:
-                    st.toast(f"🎯 CE Target Hit (90% Profit) at ₹{live_ce}!")
+                    st.toast(f"🎯 CE Target Hit (90% Profit)! Exiting CE...")
                     place_exit_order(ce_symbol, ce_token, lot_size)
                     ce_active = False 
 
             if pe_active:
                 if live_pe >= pe_sl_price:
-                    st.toast(f"⚠️ PE Stop Loss Hit at ₹{live_pe}!")
+                    st.toast(f"⚠️ PE Stop Loss Hit at ₹{live_pe}! Adjusting Position...")
+                    
+                    # 1. Loss wale PE ko kaato
                     place_exit_order(pe_symbol, pe_token, lot_size)
                     pe_active = False 
+                    
+                    # 2. Profit wale CE ko bhi book kar lo
+                    if ce_active:
+                        place_exit_order(ce_symbol, ce_token, lot_size)
+                        ce_active = False
+                        st.toast(f"🔄 CE also booked to roll down!")
+                    
+                    # 3. NAYA CE SELL KARNA
+                    new_strike = target_strike - 500  # 500 point neeche shift kiya
+                    new_ce_token, new_ce_symbol = get_token_info("NIFTY", new_strike, "CE", target_expiry)
+                    
+                    if new_ce_token:
+                        place_new_sell_order(new_ce_symbol, new_ce_token, lot_size)
+                        st.toast(f"✅ Rolled Down: Sold Naya Call {new_strike} CE!")
+                        
+                        # Naye CE ki details update
+                        ce_active = True
+                        ce_symbol = new_ce_symbol
+                        ce_token = new_ce_token
+                        
+                        # Naye CE ka SL aur Target
+                        live_new_ce = smartApi.ltpData("NFO", ce_symbol, ce_token)['data']['ltp']
+                        ce_sl_price = live_new_ce * (1 + (leg_sl_percent / 100))
+                        ce_target_price = live_new_ce * (1 - (leg_target_percent / 100))
+                        
                 elif live_pe <= pe_target_price:
-                    st.toast(f"🎯 PE Target Hit (90% Profit) at ₹{live_pe}!")
+                    st.toast(f"🎯 PE Target Hit (90% Profit)! Exiting PE...")
                     place_exit_order(pe_symbol, pe_token, lot_size)
                     pe_active = False 
                 
@@ -306,4 +360,4 @@ if start_algo:
             time.sleep(1)
             
     else:
-        st.error("❌ Token nahi mila. Kripya Expiry date check karein.")
+        st.error("❌ Token nahi mila. Kripya Expiry date check karein.")   
