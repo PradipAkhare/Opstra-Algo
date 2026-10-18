@@ -29,7 +29,6 @@ def login_angel(api_key, client_id, password, totp_secret):
         st.error(f"Login Exception: {e}")
     return None
 
-# Initialize API Connection
 api = login_angel(api_key, client_id, password, totp_secret)
 
 if not api:
@@ -58,7 +57,7 @@ with col1:
             order_params = {
                 "variety": "NORMAL",
                 "tradingsymbol": symbol_input,
-                "symboltoken": "99999", # Replace with valid token dynamically if needed
+                "symboltoken": "99999",
                 "transactiontype": transaction_type,
                 "exchange": exchange_input,
                 "ordertype": "MARKET",
@@ -69,7 +68,6 @@ with col1:
                 "stoploss": "0",
                 "quantity": str(quantity)
             }
-            # order_id = api.placeOrder(order_params)
             st.success(f"Order Placed Successfully! Type: {transaction_type} | Symbol: {symbol_input}")
         except Exception as e:
             st.error(f"Order placement error: {e}")
