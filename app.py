@@ -112,7 +112,7 @@ sym_name = st.sidebar.selectbox("🔍 Search F&O Symbol", options=unique_syms, i
 
 sym_df = fno_df[fno_df['name']==sym_name]
 if not sym_df.empty:
-    opt_df = sym_df[sym_df['symbol'].str.endswith('CE') | symbol_df['symbol'].str.endswith('PE')]
+    opt_df = sym_df[sym_df['symbol'].str.endswith('CE') | sym_df['symbol'].str.endswith('PE')]
     if not opt_df.empty:
         exps = sorted(opt_df['expiry'].dropna().unique(), key=parse_exp)
         near_df = opt_df[opt_df['expiry']==exps[0]]
@@ -225,7 +225,6 @@ if "Option Chain" in strat:
     with st.expander(f"⛓️ {sym_name} Option Chain", expanded=True):
         st.markdown(f"#### 📍 {sym_name} ATM: **{tgt_stk}**")
         
-        # 👇 TOGGLE VIEW: COMPACT (CORE INFO) VS ADVANCED (ALL COLUMNS) 👇
         view_mode = st.radio("👁️ View Mode", ["Compact View (LTP, OI, Chg OI, Strike, Build-up)", "Expand All Columns (Greeks & Details)"], horizontal=True)
 
         ch_data = []
@@ -235,7 +234,7 @@ if "Option Chain" in strat:
             pd_d, pt, pv = bs_greeks(tgt_stk, s, dte, "PE")
             cp, pp = round(bs_price(tgt_stk, s, dte, "CE"),2), round(bs_price(tgt_stk, s, dte, "PE"),2)
             oi = int(100000*math.exp(-((s-tgt_stk)**2)/100000))
-            choi = int(oi * 0.05) # Simulated Change in OI
+            choi = int(oi * 0.05)
             
             ce_build = "🔴 Short Buildup" if s >= tgt_stk else "🚀 Short Covering"
             pe_build = "🟢 Long Buildup" if s > tgt_stk else "🔴 Short Buildup"
