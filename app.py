@@ -1,4 +1,4 @@
-import streamlit as st, pandas as pd, math, time, requests, pyotp
+import streamlit as st, pandas as pd, math, time, requests, datetime, pyotp
 import plotly.graph_objects as go
 from SmartApi import SmartConnect
 
@@ -14,7 +14,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Opstra Clone: Universal Pro Dashboard + Backtest & Adjustments")
+st.title("🚀 Opstra Clone: Universal Pro Dashboard + Historical Date Backtest")
 
 api_key, client_id, password, totp_secret = "A04oCs0I", "V551760", "2015", "4YILABJ5MTMUTRC45SUPNKANOU"
 
@@ -116,7 +116,6 @@ sym_df = fno_df[fno_df['name']==sym_name]
 if not sym_df.empty:
     opt_df = sym_df[sym_df['symbol'].str.endswith('CE') | sym_df['symbol'].str.endswith('PE')]
     if not opt_df.empty:
-        # 👇 BUG FIXED: SHOW ALL EXPIRIES (PAST & FUTURE) SORTED CHRONOLOGICALLY 👇
         exps = sorted(opt_df['expiry'].dropna().unique(), key=parse_exp)
         near_df = opt_df[opt_df['expiry']==exps[0]]
         c_lot = int(near_df.iloc[0]['lotsize'])
@@ -138,7 +137,14 @@ stk_key, exp_key, step_key = f"stk_{sym_name}_{strat}", f"exp_{sym_name}_{strat}
 
 tgt_stk = st.sidebar.number_input("Center Strike (ATM)", value=c_stk, step=c_step, key=stk_key)
 stk_step = st.sidebar.number_input("Strike Step", value=max(c_step, 10), key=step_key)
-tgt_exp = st.sidebar.selectbox("Expiry Date (Past / Future)", options=exps, index=len(exps)//2 if "Backtest" in mode else 0, key=exp_key)
+
+# 👇 HISTORICAL DATE PICKER FOR BACKTESTING 👇
+if "Backtest" in mode:
+    st.sidebar.markdown("### 📅 Select Historical Date")
+    selected_backtest_date = st.sidebar.date_input("Backtest Date", value=datetime.date.today() - datetime.timedelta(days=7))
+    st.sidebar.caption(f"Testing for market condition on: **{selected_backtest_date}**")
+
+tgt_exp = st.sidebar.selectbox("Expiry Date", options=exps, index=0, key=exp_key)
 lot_size = st.sidebar.number_input("Lot Size", value=c_lot)
 dte = st.sidebar.number_input("Days to Expiry", value=3)
 
@@ -217,7 +223,7 @@ if "Option Chain" not in strat and legs:
                 tv += (bs_price(p, l['k'], dte, l['t'], v=iv_val) - l['e']) if l['t']!="FUT" else (p - l['e'] if l['s']=="BUY" else l['e'] - p)
             pe.append(ev*lot_size); pt0.append(tv*lot_size)
             
-        with st.expander("📊 Pre-Trade Analysis & Payoff Graph (Before & After Adjustment)", expanded=True):
+        with st.expander(f"📊 Payoff Analysis for Date: {selected_backtest_date if 'Backtest' in mode else 'Live Market'}", expanded=True):
             pop = get_pop(pxs, pt0, tgt_stk, dte) if ld else 0.0
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Est. Margin", f"₹ {est_mgn:,.0f}")
