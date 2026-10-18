@@ -265,16 +265,12 @@ if "Option Chain" in strategy:
             
             for col in df_chain.columns:
                 if current_strike == atm_strike:
-                    # ATM Strike ko Golden color se highlight karega
                     styles.append('background-color: rgba(255, 215, 0, 0.2); font-weight: bold; border-top: 1px solid #FFD700; border-bottom: 1px solid #FFD700;')
                 elif current_strike < atm_strike and 'CE' in col:
-                    # CE In-The-Money (ITM) -> Light Blue/Grey Tint
                     styles.append('background-color: rgba(135, 206, 250, 0.08);')
                 elif current_strike > atm_strike and 'PE' in col:
-                    # PE In-The-Money (ITM) -> Light Blue/Grey Tint
                     styles.append('background-color: rgba(135, 206, 250, 0.08);')
                 else:
-                    # Out-Of-The-Money (OTM) -> Normal background
                     styles.append('')
             return styles
 
@@ -573,7 +569,7 @@ if len(legs_config) > 0:
                             break
                             
                         time.sleep(1)
-                        
+    
     else:
         st.warning(f"⚠️ {symbol_name} ka Token nahi mila. Kripya Expiry Date check karein ya Strike badlein.")
 else:
