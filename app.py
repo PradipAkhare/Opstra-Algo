@@ -33,6 +33,11 @@ def_idx = unique_syms.index("NIFTY") if "NIFTY" in unique_syms else 0
 # ==========================================
 # 2. HELPER FUNCTIONS
 # ==========================================
+# 👇 BUG FIXED: Safe Date Parser to prevent Streamlit Crashes 👇
+def parse_exp(d):
+    try: return pd.to_datetime(str(d))
+    except: return pd.Timestamp.max
+
 def get_token(sym, stk, typ, exp):
     f = fno_df[(fno_df['name']==sym) & (fno_df['expiry']==exp)].copy()
     if typ == "FUT": f = f[f['symbol'].str.endswith('FUT')]
@@ -85,7 +90,8 @@ sym_df = fno_df[fno_df['name']==sym_name]
 if not sym_df.empty:
     opt_df = sym_df[sym_df['symbol'].str.endswith('CE') | sym_df['symbol'].str.endswith('PE')]
     if not opt_df.empty:
-        exps = sorted(opt_df['expiry'].dropna().unique(), key=lambda x: pd.to_datetime(str(x).upper(), format="%d%b%Y", errors='ignore'))
+        # 👇 Used parse_exp to prevent crashes 👇
+        exps = sorted(opt_df['expiry'].dropna().unique(), key=parse_exp)
         near_df = opt_df[opt_df['expiry']==exps[0]]
         c_lot = int(near_df.iloc[0]['lotsize'])
         raw_stks = sorted(near_df['strike'].astype(float).unique())
@@ -93,7 +99,8 @@ if not sym_df.empty:
         c_step = int(stks[1]-stks[0]) if len(stks)>1 else 50
         c_stk = int(stks[len(stks)//2])
     else:
-        exps = sorted(sym_df['expiry'].dropna().unique(), key=lambda x: pd.to_datetime(str(x).upper(), format="%d%b%Y", errors='ignore'))
+        # 👇 Used parse_exp here too 👇
+        exps = sorted(sym_df['expiry'].dropna().unique(), key=parse_exp)
         c_lot, c_step, c_stk = int(sym_df.iloc[0]['lotsize']), 50, 25000
 else: exps, c_lot, c_step, c_stk = ["29DEC2026"], 25, 50, 25000
 
