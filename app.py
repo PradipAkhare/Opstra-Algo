@@ -227,9 +227,83 @@ if legs:
                 ev += calc_pnl(p, l['k'], l['e'], l['t'], l['s'], 0, False)
                 tv += calc_pnl(p, l['k'], l['e'], l['t'], l['s'], dte, True)
             pe.append(ev*lot_size); pt0.append(tv*lot_size)
-            
-        st.markdown("---")
+            st.markdown("---")
         with st.expander("📊 Pre-Trade Analysis & Payoff Graph", expanded=True):
             pop = get_pop(pxs, pt0, tgt_stk, dte) if ld else 0.0
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Est. Margin Required", f"₹ {est_mgn:,.0f
+            m1.metric("Est. Margin Required", f"₹ {est_mgn:,.0f}")
+            m2.metric("Max Profit (At Expiry)", "Unlimited 🚀" if (pe[-1]-pe[-2]>1 or pe[0]-pe[1]>1) else f"₹ {max(pe):.2f}")
+            m3.metric("Max Loss (At Expiry)", "Unlimited ⚠️" if (pe[-1]-pe[-2]<-1 or pe[0]-pe[1]<-1) else f"₹ {min(pe):.2f}")
+            m4.metric("Probability of Profit", f"{pop} %")
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=pxs, y=[x if x>=0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(0,128,0,0.3)', showlegend=False))
+            fig.add_trace(go.Scatter(x=pxs, y=[x if x<0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(255,0,0,0.3)', showlegend=False))
+            fig.add_trace(go.Scatter(x=pxs, y=pe, mode='lines', name='Expiry Payoff', line=dict(color='blue', dash='dash')))
+            fig.add_trace(go.Scatter(x=pxs, y=pt0, mode='lines', name='T+0 Payoff', line=dict(color='darkorange', width=3)))
+            fig.add_vline(x=tgt_stk, line_dash="dot", line_color="red", annotation_text="Strike")
+            fig.add_hline(y=0, line_color="black")
+            st.plotly_chart(fig, use_container_width=True)
+
+        if start:
+            st.success("✅ Algo Started & Orders Placed!")
+            with st.expander("⚡ Live MTM & Tracker", expanded=True):
+                cs = st.columns(len(ld))
+                lms = [cs[i].empty() for i in range(len(ld))]
+                g1, g2, g3, g4 = st.columns(4)
+                pm, dm, tm, vm, msg = g1.empty(), g2.empty(), g3.empty(), g4.empty(), st.empty()
+                mpnl = 0
+                while True:
+                    pnl, td, tt, tv = 0, 0, 0, 0
+                    for i, l in enumerate(ld):
+                        if not l['a']: lms[i].metric(f"🔴 {l['s']} {l['k']} {l['t']}", "Closed"); continue
+                        l['l'] = api.ltpData(l['ex'], l['sm'], l['tk'])['data']['ltp']
+                        pnl += calc_pnl(l['l'], l['k'], l['e'], l['t'], l['s'], 0)*lot_size
+                        d, t, v = bs_greeks(tgt_stk, l['k'], dte, "CE" if l['t']=="CE" else "PE")
+                        if l['s']=="SELL": d, t, v = -d, -t, -v
+                        td+=d; tt+=t; tv+=v
+                        lms[i].metric(f"🟢 {l['s']} {l['k']} {l['t']}", f"₹ {l['l']}")
+                        lms[i].caption(f"Traded: {l['sm']}")
+                    
+                    pm.metric("Total MTM P&L", f"₹ {pnl:.2f}")
+                    dm.metric("Total Delta", f"{td:.2f}")
+                    tm.metric("Total Theta", f"₹ {tt*lot_size:.2f}/day")
+                    vm.metric("Total Vega", f"{tv:.2f}")
+                    
+                    if pnl>mpnl: mpnl=pnl
+                    if mpnl>=tsl_act and pnl<=(mpnl-tsl_trl):
+                        msg.error(f"🛡️ TRAILING SL HIT! Protected Profit at ₹{pnl:.2f}.")
+                        for l in ld:
+                            if l['a']: place_order(l['sm'], l['tk'], lot_size, "SELL" if l['s']=="BUY" else "BUY", l['ex'])
+                        break
+                    if pnl<=m_loss:
+                        msg.error(f"⚠️ MAX LOSS HIT! (₹{pnl:.2f})")
+                        for l in ld:
+                            if l['a']: place_order(l['sm'], l['tk'], lot_size, "SELL" if l['s']=="BUY" else "BUY", l['ex'])
+                        break
+                        
+                    if "Naked Sell" in strat and len(ld)>=2:
+                        ce, pe_l = ld[0], ld[1]
+                        if ce['a'] and ce['l']>=ce['sl']:
+                            place_order(ce['sm'], ce['tk'], lot_size, "BUY", ce['ex']); ce['a']=False
+                            if pe_l['a']: place_order(pe_l['sm'], pe_l['tk'], lot_size, "BUY", pe_l['ex']); pe_l['a']=False
+                            n_stk = tgt_stk + (10*stk_step)
+                            n_tk, n_sm, n_ex = get_token(sym_name, n_stk, "PE", tgt_exp)
+                            if n_tk:
+                                place_order(n_sm, n_tk, lot_size, "SELL", n_ex)
+                                pe_l.update({"a":True, "sm":n_sm, "tk":n_tk, "k":n_stk, "ex":n_ex, "l":api.ltpData(n_ex,n_sm,n_tk)['data']['ltp']})
+                                pe_l['sl'] = pe_l['l']*(1+sl_p/100)
+                        if pe_l['a'] and pe_l['l']>=pe_l['sl']:
+                            place_order(pe_l['sm'], pe_l['tk'], lot_size, "BUY", pe_l['ex']); pe_l['a']=False
+                            if ce['a']: place_order(ce['sm'], ce['tk'], lot_size, "BUY", ce['ex']); ce['a']=False
+                            n_stk = tgt_stk - (10*stk_step)
+                            n_tk, n_sm, n_ex = get_token(sym_name, n_stk, "CE", tgt_exp)
+                            if n_tk:
+                                place_order(n_sm, n_tk, lot_size, "SELL", n_ex)
+                                ce.update({"a":True, "sm":n_sm, "tk":n_tk, "k":n_stk, "ex":n_ex, "l":api.ltpData(n_ex,n_sm,n_tk)['data']['ltp']})
+                                ce['sl'] = ce['l']*(1+sl_p/100)
+                    time.sleep(1)
+    else: st.warning(f"⚠️ {sym_name} ka Token nahi mila. Kripya Expiry Date check karein.")
+elif "Option Chain" in strat:
+    st.info("👆 Option Chain mein se koi leg select karein (Buy/Sell check box pe tick mark karein) taaki Payoff Graph dikh sake!")
+      
