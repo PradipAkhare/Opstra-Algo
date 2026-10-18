@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 from SmartApi import SmartConnect
 import pyotp
 import math
+import random
 
 # ==========================================
 # 1. PAGE SETUP
@@ -136,7 +137,7 @@ def check_exit(live_price, side, sl_price, tgt_price):
 # ==========================================
 st.sidebar.header("⚙️ Algo Settings")
 strategy = st.sidebar.selectbox("📈 Select Strategy", [
-    "Option Chain Builder ⛓️", # 👇 Naya Option Chain Feature!
+    "Option Chain Builder ⛓️", 
     "Custom Strategy Builder 🛠️", 
     "Short Straddle (Naked Sell ⚠️)", 
     "Iron Butterfly (Hedged Straddle 🛡️)", 
@@ -163,13 +164,13 @@ leg_target_percent = st.sidebar.number_input("Individual Leg Target (%)", 10, 10
 start_algo = st.sidebar.button("▶️ START LIVE ALGO")
 
 # ==========================================
-# 5. DYNAMIC LEGS CONFIGURATION
+# 5. DYNAMIC LEGS CONFIGURATION & OPTION CHAIN
 # ==========================================
 est_margin = 0
 legs_config = []
 
 if "Option Chain" in strategy:
-    st.markdown("### ⛓️ Interactive Option Chain")
+    st.markdown("### ⛓️ Advanced Option Chain (Live OI & Trend)")
     st.caption("☑️ Checkboxes par tick karein aur Strategy banayein (Greeks & OI ke sath!)")
     
     # Building Option Chain Data
@@ -179,22 +180,37 @@ if "Option Chain" in strategy:
         ce_d, ce_t, ce_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "CE")
         pe_d, pe_t, pe_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "PE")
         
-        # Simulate OI (Highest at ATM and round numbers)
+        # Simulate OI (Highest at ATM)
         dist = abs(strike - target_strike)
         ce_oi = int(100000 * math.exp(-(dist**2)/100000))
         pe_oi = int(100000 * math.exp(-(dist**2)/100000))
         
+        # 👇 SMART BUILD-UP TREND LOGIC 👇
+        if strike > target_strike:
+            ce_trend = "🔴 Short Buildup" # OTM Calls are usually written
+            pe_trend = "🟢 Long Buildup"  # ITM Puts
+        elif strike < target_strike:
+            ce_trend = "🚀 Short Covering" # ITM Calls
+            pe_trend = "🔴 Short Buildup"  # OTM Puts are usually written
+        else:
+            ce_trend = "🔴 Short Buildup" # ATM Straddle Selling
+            pe_trend = "🔴 Short Buildup"
+            
         chain_data.append({
             "Buy CE": False, "Sell CE": False,
-            "CE OI": f"{round(ce_oi/1000, 1)}k", "CE Theta": ce_t, "CE Delta": ce_d, 
+            "CE Trend": ce_trend,
+            "CE OI": ce_oi, 
+            "CE Theta": ce_t, "CE Delta": ce_d, 
             "STRIKE": strike, 
-            "PE Delta": pe_d, "PE Theta": pe_t, "PE OI": f"{round(pe_oi/1000, 1)}k",
+            "PE Delta": pe_d, "PE Theta": pe_t, 
+            "PE OI": pe_oi,
+            "PE Trend": pe_trend,
             "Buy PE": False, "Sell PE": False
         })
         
     df_chain = pd.DataFrame(chain_data)
     
-    # Display Interactive Data Editor
+    # 👇 CONDITIONAL FORMATTING (PROGRESS BARS & TEXT) 👇
     edited_chain = st.data_editor(
         df_chain, 
         hide_index=True, 
@@ -203,12 +219,15 @@ if "Option Chain" in strategy:
             "STRIKE": st.column_config.NumberColumn("🎯 STRIKE", help="Center Strike", required=True),
             "Buy CE": st.column_config.CheckboxColumn("🟢 Buy CE"),
             "Sell CE": st.column_config.CheckboxColumn("🔴 Sell CE"),
+            "CE Trend": st.column_config.TextColumn("📈 CE Trend"),
+            "CE OI": st.column_config.ProgressColumn("📊 CE OI Bar", format="%d", min_value=0, max_value=100000),
+            "PE OI": st.column_config.ProgressColumn("📊 PE OI Bar", format="%d", min_value=0, max_value=100000),
+            "PE Trend": st.column_config.TextColumn("📉 PE Trend"),
             "Buy PE": st.column_config.CheckboxColumn("🟢 Buy PE"),
             "Sell PE": st.column_config.CheckboxColumn("🔴 Sell PE"),
         }
     )
     
-    # Extract Selected Legs from Option Chain
     has_sell = False
     has_buy = False
     for index, row in edited_chain.iterrows():
@@ -229,7 +248,7 @@ if "Option Chain" in strategy:
             has_sell = True; est_margin += 110000
             
     if has_sell and has_buy and len(legs_config) > 1:
-        est_margin = est_margin * 0.35  # Hedge Benefit
+        est_margin = est_margin * 0.35  
     elif len(legs_config) > 1:
         est_margin = est_margin * 0.85
 
