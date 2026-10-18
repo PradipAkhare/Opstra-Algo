@@ -454,4 +454,57 @@ if len(legs_config) > 0:
                                         pe_leg["token"] = new_token
                                         pe_leg["strike"] = new_strike
                                         pe_leg["live"] = smartApi.ltpData("NFO", new_symbol, new_token)['data']['ltp']
-                                        pe_leg["sl"], pe_leg["tgt"] = get_exit_prices(pe_
+                                        pe_leg["sl"], pe_leg["tgt"] = get_exit_prices(pe_leg["live"], "SELL", leg_sl_percent, leg_target_percent)
+                                elif ce_leg["live"] <= ce_leg["tgt"]:
+                                    place_order_api(ce_leg["symbol"], ce_leg["token"], lot_size, "BUY")
+                                    ce_leg["active"] = False 
+
+                            if pe_leg["active"]:
+                                if pe_leg["live"] >= pe_leg["sl"]:
+                                    st.toast(f"⚠️ PE Stop Loss Hit! Adjusting...")
+                                    place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
+                                    pe_leg["active"] = False 
+                                    if ce_leg["active"]:
+                                        place_order_api(ce_leg["symbol"], ce_leg["token"], lot_size, "BUY")
+                                        ce_leg["active"] = False
+                                    
+                                    new_strike = target_strike - 500 
+                                    new_token, new_symbol = get_token_info("NIFTY", new_strike, "CE", target_expiry)
+                                    if new_token:
+                                        place_order_api(new_symbol, new_token, lot_size, "SELL")
+                                        ce_leg["active"] = True
+                                        ce_leg["symbol"] = new_symbol
+                                        ce_leg["token"] = new_token
+                                        ce_leg["strike"] = new_strike
+                                        ce_leg["live"] = smartApi.ltpData("NFO", new_symbol, new_token)['data']['ltp']
+                                        ce_leg["sl"], ce_leg["tgt"] = get_exit_prices(ce_leg["live"], "SELL", leg_sl_percent, leg_target_percent)
+                                elif pe_leg["live"] <= pe_leg["tgt"]:
+                                    place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
+                                    pe_leg["active"] = False 
+                        else:
+                            all_closed = True
+                            for leg in leg_data:
+                                if leg["active"]:
+                                    all_closed = False
+                                    hit_sl, hit_tgt = check_exit(leg["live"], leg["side"], leg["sl"], leg["tgt"])
+                                    if hit_sl or hit_tgt:
+                                        st.toast(f"🔔 {leg['strike']} {leg['type']} Hit Target/SL!")
+                                        place_order_api(leg["symbol"], leg["token"], lot_size, "SELL" if leg["side"]=="BUY" else "BUY")
+                                        leg["active"] = False
+                            if all_closed:
+                                status_msg.error("🛑 All legs squared off. Algo stopped.")
+                                break
+                            
+                        if pnl <= max_loss:
+                            status_msg.error(f"⚠️ TOTAL MAX LOSS HIT! (-₹{abs(round(pnl,2))}) Squaring off all...")
+                            for leg in leg_data:
+                                if leg["active"]: place_order_api(leg["symbol"], leg["token"], lot_size, "SELL" if leg["side"]=="BUY" else "BUY")
+                            break
+                            
+                        time.sleep(1)
+                        
+    else:
+        st.warning("⚠️ Koi ek Token nahi mila. Kripya Expiry Date check karein (Jaise: 29DEC2026) ya Strike badlein.")
+else:
+    if "Option Chain" in strategy:
+        st.info("👆 Option Chain mein se koi leg select karein (Buy/Sell check box pe tick mark karein) taaki Payoff Graph dikh sake!")
