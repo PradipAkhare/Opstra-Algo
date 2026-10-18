@@ -116,6 +116,7 @@ sym_df = fno_df[fno_df['name']==sym_name]
 if not sym_df.empty:
     opt_df = sym_df[sym_df['symbol'].str.endswith('CE') | sym_df['symbol'].str.endswith('PE')]
     if not opt_df.empty:
+        # 👇 BUG FIXED: SHOW ALL EXPIRIES (PAST & FUTURE) SORTED CHRONOLOGICALLY 👇
         exps = sorted(opt_df['expiry'].dropna().unique(), key=parse_exp)
         near_df = opt_df[opt_df['expiry']==exps[0]]
         c_lot = int(near_df.iloc[0]['lotsize'])
@@ -137,7 +138,7 @@ stk_key, exp_key, step_key = f"stk_{sym_name}_{strat}", f"exp_{sym_name}_{strat}
 
 tgt_stk = st.sidebar.number_input("Center Strike (ATM)", value=c_stk, step=c_step, key=stk_key)
 stk_step = st.sidebar.number_input("Strike Step", value=max(c_step, 10), key=step_key)
-tgt_exp = st.sidebar.selectbox("Expiry Date", options=exps, index=0, key=exp_key)
+tgt_exp = st.sidebar.selectbox("Expiry Date (Past / Future)", options=exps, index=len(exps)//2 if "Backtest" in mode else 0, key=exp_key)
 lot_size = st.sidebar.number_input("Lot Size", value=c_lot)
 dte = st.sidebar.number_input("Days to Expiry", value=3)
 
@@ -187,8 +188,6 @@ elif "Bullish" in strat: legs = [("FUT","BUY",0),("PE","BUY",0)]; est_mgn=45000
 else: legs = [("FUT","SELL",0),("CE","BUY",0)]; est_mgn=45000
 
 est_mgn = (lot_size/25)*est_mgn
-
-# Effective spot for simulation
 eff_spot = tgt_stk * (1 + sim_spot_shift / 100.0) if "Backtest" in mode else tgt_stk
 
 # ==========================================
@@ -341,8 +340,7 @@ if start:
         g1, g2, g3, g4 = st.columns(4)
         pm, dm, tm, vm, msg = g1.empty(), g2.empty(), g3.empty(), g4.empty(), st.empty()
         mpnl = 0
-        
-        for step in range(5):  # Simulation loop / live loop
+        for step in range(5):
             pnl, td, tt, tv = 0, 0, 0, 0
             for i, l in enumerate(ld):
                 if not l['a']: lms[i].metric(f"🔴 {l['s']} {l['k']} {l['t']}", "Closed"); continue
