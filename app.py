@@ -14,7 +14,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Opstra Clone: Universal Pro Dashboard + Auto Expiry & Payoff Graph")
+st.title("🚀 Opstra Clone: Universal Pro Dashboard + Fixed Expiry Backtest")
 
 api_key, client_id, password, totp_secret = "A04oCs0I", "V551760", "2015", "4YILABJ5MTMUTRC45SUPNKANOU"
 
@@ -139,22 +139,11 @@ stk_key, exp_key, step_key = f"stk_{sym_name}_{strat}", f"exp_{sym_name}_{strat}
 tgt_stk = st.sidebar.number_input("Center Strike (ATM)", value=c_stk, step=c_step, key=stk_key)
 stk_step = st.sidebar.number_input("Strike Step", value=max(c_step, 10), key=step_key)
 
-# 👇 AUTO-CALCULATE NEXT EXPIRY BASED ON SELECTED BACKTEST DATE 👇
+# 👇 COMPLETELY MANUAL EXPIRY INPUT FOR BACKTESTING (NO AUTO OVERRIDE) 👇
 if "Backtest" in mode:
-    st.sidebar.markdown("### 📅 Select Historical Date")
+    st.sidebar.markdown("### 📅 Select Historical Date & Expiry")
     selected_backtest_date = st.sidebar.date_input("Backtest Date", value=datetime.date.today() - datetime.timedelta(days=7))
-    
-    # Automatically find the next nearest expiry from the selected backtest date
-    auto_exp_str = "24SEP2026"
-    if exps:
-        dt_selected = pd.to_datetime(selected_backtest_date)
-        future_exps = [e for e in exps if parse_exp(e) >= dt_selected]
-        if future_exps:
-            auto_exp_str = future_exps[0]
-        else:
-            auto_exp_str = exps[-1]
-
-    tgt_exp = st.sidebar.text_input("Auto-Detected / Manual Expiry", value=auto_exp_str).upper()
+    tgt_exp = st.sidebar.text_input("Enter Expiry Date (e.g. 24SEP2025)", value="24SEP2025").upper()
     st.sidebar.caption(f"Testing on: **{selected_backtest_date}** | Expiry: **{tgt_exp}**")
 else:
     tgt_exp = st.sidebar.selectbox("Expiry Date", options=exps, index=0, key=exp_key)
