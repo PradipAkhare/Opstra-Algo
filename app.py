@@ -26,36 +26,37 @@ if not api: st.error("Login Failed ❌ Kripya API details check karein."); st.st
 st.sidebar.success("✅ Login Successful!")
 
 df = get_df()
-fno_df = df[df['exch_seg'].isin(['NFO', 'MCX'])]
+# 👇 BUG FIXED: ADDED 'BFO' FOR SENSEX AND BANKEX 👇
+fno_df = df[df['exch_seg'].isin(['NFO', 'MCX', 'BFO'])]
 unique_syms = sorted(fno_df['name'].dropna().unique())
 def_idx = unique_syms.index("NIFTY") if "NIFTY" in unique_syms else 0
 
 # ==========================================
-# 2. HELPER FUNCTIONS (SMART FUT EXPIRY)
+# 2. HELPER FUNCTIONS
 # ==========================================
 def parse_exp(d):
     try: return pd.to_datetime(str(d))
     except: return pd.Timestamp.max
 
 def get_token(sym, stk, typ, exp):
-    if typ == "FUT": # 👇 BUG FIXED: Auto fetches Monthly FUT even if Weekly Option is selected
+    if typ == "FUT": 
         f = fno_df[(fno_df['name']==sym) & (fno_df['symbol'].str.endswith('FUT'))].copy()
-        if f.empty: return None, None
+        if f.empty: return None, None, None
         f['exp_date'] = f['expiry'].apply(parse_exp)
         v_futs = f[f['exp_date'] >= parse_exp(exp)].sort_values('exp_date')
         f_tgt = v_futs if not v_futs.empty else f.sort_values('exp_date')
-        return f_tgt.iloc[0]['token'], f_tgt.iloc[0]['symbol']
+        return f_tgt.iloc[0]['token'], f_tgt.iloc[0]['symbol'], f_tgt.iloc[0]['exch_seg']
     else:
         f = fno_df[(fno_df['name']==sym) & (fno_df['expiry']==exp) & (fno_df['symbol'].str.endswith(typ))].copy()
-        if f.empty: return None, None
+        if f.empty: return None, None, None
         f['num_stk'] = pd.to_numeric(f['strike'], errors='coerce')
-        f['norm_stk'] = [s/100 if seg=='NFO' else s for s, seg in zip(f['num_stk'], f['exch_seg'])]
-        f['diff'] = abs(f['norm_stk'] - float(stk))
+        # 👇 UNIVERSAL STRIKE SCALER FOR NFO & BFO 👇
+        f['diff'] = f['num_stk'].apply(lambda x: min(abs(x-float(stk)), abs((x/100)-float(stk)), abs((x/10000)-float(stk))))
         f = f.sort_values('diff')
-        return (f.iloc[0]['token'], f.iloc[0]['symbol'])
+        return f.iloc[0]['token'], f.iloc[0]['symbol'], f.iloc[0]['exch_seg']
 
-def place_order(sym, tok, qty, side):
-    try: return api.placeOrder({"variety":"NORMAL","tradingsymbol":sym,"symboltoken":tok,"transactiontype":side,"exchange":"NFO","ordertype":"MARKET","producttype":"CARRYFORWARD","duration":"DAY","quantity":qty})
+def place_order(sym, tok, qty, side, exch="NFO"):
+    try: return api.placeOrder({"variety":"NORMAL","tradingsymbol":sym,"symboltoken":tok,"transactiontype":side,"exchange":exch,"ordertype":"MARKET","producttype":"CARRYFORWARD","duration":"DAY","quantity":qty})
     except Exception as e: return str(e)
 
 def bs_greeks(S, K, T, typ="CE", r=0.10, v=0.15):
@@ -103,8 +104,9 @@ if not sym_df.empty:
         exps = sorted(opt_df['expiry'].dropna().unique(), key=parse_exp)
         near_df = opt_df[opt_df['expiry']==exps[0]]
         c_lot = int(near_df.iloc[0]['lotsize'])
+        seg = near_df.iloc[0]['exch_seg']
         raw_stks = sorted(near_df['strike'].astype(float).unique())
-        stks = sorted(list(set([s/100 if near_df.iloc[0]['exch_seg']=='NFO' else s for s in raw_stks])))
+        stks = sorted(list(set([s/10000 if seg=='BFO' else (s/100 if seg=='NFO' else s) for s in raw_stks])))
         c_step = int(stks[1]-stks[0]) if len(stks)>1 else 50
         c_stk = int(stks[len(stks)//2])
     else:
@@ -112,7 +114,7 @@ if not sym_df.empty:
         c_lot, c_step, c_stk = int(sym_df.iloc[0]['lotsize']), 50, 25000
 else: exps, c_lot, c_step, c_stk = ["29DEC2026"], 25, 50, 25000
 
-sm_stks = {"NIFTY":24000, "BANKNIFTY":51000, "FINNIFTY":23000, "CRUDEOIL":6000, "GOLD":75000, "RELIANCE":3000}
+sm_stks = {"NIFTY":24000, "BANKNIFTY":51000, "FINNIFTY":23000, "SENSEX":80000, "BANKEX":60000, "CRUDEOIL":6000, "GOLD":75000, "RELIANCE":3000}
 if sym_name in sm_stks: c_stk = sm_stks[sym_name]
 
 st.sidebar.markdown("### 🔍 Asset Settings")
@@ -207,13 +209,13 @@ est_mgn = (lot_size/25)*est_mgn
 ld, aok = [], True
 if legs:
     for t, sd, off in legs:
-        tk, sm = get_token(sym_name, tgt_stk+off, t, tgt_exp)
-        if tk: ld.append({"t":t, "s":sd, "k":tgt_stk+off, "tk":tk, "sm":sm, "a":True})
+        tk, sm, ex = get_token(sym_name, tgt_stk+off, t, tgt_exp)
+        if tk: ld.append({"t":t, "s":sd, "k":tgt_stk+off, "tk":tk, "sm":sm, "a":True, "ex":ex})
         else: aok = False
     
     if aok:
         for l in ld:
-            l['e'] = api.ltpData("NFO", l['sm'], l['tk'])['data']['ltp']
+            l['e'] = api.ltpData(l['ex'], l['sm'], l['tk'])['data']['ltp']
             l['sl'] = l['e']*(1-sl_p/100) if l['s']=="BUY" else l['e']*(1+sl_p/100)
             l['tg'] = l['e']*(1+tgt_p/100) if l['s']=="BUY" else l['e']*(1-tgt_p/100)
         
@@ -230,78 +232,4 @@ if legs:
         with st.expander("📊 Pre-Trade Analysis & Payoff Graph", expanded=True):
             pop = get_pop(pxs, pt0, tgt_stk, dte) if ld else 0.0
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Est. Margin Required", f"₹ {est_mgn:,.0f}")
-            m2.metric("Max Profit (At Expiry)", "Unlimited 🚀" if (pe[-1]-pe[-2]>1 or pe[0]-pe[1]>1) else f"₹ {max(pe):.2f}")
-            m3.metric("Max Loss (At Expiry)", "Unlimited ⚠️" if (pe[-1]-pe[-2]<-1 or pe[0]-pe[1]<-1) else f"₹ {min(pe):.2f}")
-            m4.metric("Probability of Profit", f"{pop} %")
-            
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=pxs, y=[x if x>=0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(0,128,0,0.3)', showlegend=False))
-            fig.add_trace(go.Scatter(x=pxs, y=[x if x<0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(255,0,0,0.3)', showlegend=False))
-            fig.add_trace(go.Scatter(x=pxs, y=pe, mode='lines', name='Expiry Payoff', line=dict(color='blue', dash='dash')))
-            fig.add_trace(go.Scatter(x=pxs, y=pt0, mode='lines', name='T+0 Payoff', line=dict(color='darkorange', width=3)))
-            fig.add_vline(x=tgt_stk, line_dash="dot", line_color="red", annotation_text="Strike")
-            fig.add_hline(y=0, line_color="black")
-            st.plotly_chart(fig, use_container_width=True)
-
-        if start:
-            st.success("✅ Algo Started & Orders Placed!")
-            with st.expander("⚡ Live MTM & Tracker", expanded=True):
-                cs = st.columns(len(ld))
-                lms = [cs[i].empty() for i in range(len(ld))]
-                g1, g2, g3, g4 = st.columns(4)
-                pm, dm, tm, vm, msg = g1.empty(), g2.empty(), g3.empty(), g4.empty(), st.empty()
-                mpnl = 0
-                while True:
-                    pnl, td, tt, tv = 0, 0, 0, 0
-                    for i, l in enumerate(ld):
-                        if not l['a']: lms[i].metric(f"🔴 {l['s']} {l['k']} {l['t']}", "Closed"); continue
-                        l['l'] = api.ltpData("NFO", l['sm'], l['tk'])['data']['ltp']
-                        pnl += calc_pnl(l['l'], l['k'], l['e'], l['t'], l['s'], 0)*lot_size
-                        d, t, v = bs_greeks(tgt_stk, l['k'], dte, "CE" if l['t']=="CE" else "PE")
-                        if l['s']=="SELL": d, t, v = -d, -t, -v
-                        td+=d; tt+=t; tv+=v
-                        lms[i].metric(f"🟢 {l['s']} {l['k']} {l['t']}", f"₹ {l['l']}")
-                        lms[i].caption(f"Traded: {l['sm']}")
-                    
-                    pm.metric("Total MTM P&L", f"₹ {pnl:.2f}")
-                    dm.metric("Total Delta", f"{td:.2f}")
-                    tm.metric("Total Theta", f"₹ {tt*lot_size:.2f}/day")
-                    vm.metric("Total Vega", f"{tv:.2f}")
-                    
-                    if pnl>mpnl: mpnl=pnl
-                    if mpnl>=tsl_act and pnl<=(mpnl-tsl_trl):
-                        msg.error(f"🛡️ TRAILING SL HIT! Protected Profit at ₹{pnl:.2f}.")
-                        for l in ld:
-                            if l['a']: place_order(l['sm'], l['tk'], lot_size, "SELL" if l['s']=="BUY" else "BUY")
-                        break
-                    if pnl<=m_loss:
-                        msg.error(f"⚠️ MAX LOSS HIT! (₹{pnl:.2f})")
-                        for l in ld:
-                            if l['a']: place_order(l['sm'], l['tk'], lot_size, "SELL" if l['s']=="BUY" else "BUY")
-                        break
-                        
-                    if "Naked Sell" in strat and len(ld)>=2:
-                        ce, pe_l = ld[0], ld[1]
-                        if ce['a'] and ce['l']>=ce['sl']:
-                            place_order(ce['sm'], ce['tk'], lot_size, "BUY"); ce['a']=False
-                            if pe_l['a']: place_order(pe_l['sm'], pe_l['tk'], lot_size, "BUY"); pe_l['a']=False
-                            n_stk = tgt_stk + (10*stk_step)
-                            n_tk, n_sm = get_token(sym_name, n_stk, "PE", tgt_exp)
-                            if n_tk:
-                                place_order(n_sm, n_tk, lot_size, "SELL")
-                                pe_l.update({"a":True, "sm":n_sm, "tk":n_tk, "k":n_stk, "l":api.ltpData("NFO",n_sm,n_tk)['data']['ltp']})
-                                pe_l['sl'] = pe_l['l']*(1+sl_p/100)
-                        if pe_l['a'] and pe_l['l']>=pe_l['sl']:
-                            place_order(pe_l['sm'], pe_l['tk'], lot_size, "BUY"); pe_l['a']=False
-                            if ce['a']: place_order(ce['sm'], ce['tk'], lot_size, "BUY"); ce['a']=False
-                            n_stk = tgt_stk - (10*stk_step)
-                            n_tk, n_sm = get_token(sym_name, n_stk, "CE", tgt_exp)
-                            if n_tk:
-                                place_order(n_sm, n_tk, lot_size, "SELL")
-                                ce.update({"a":True, "sm":n_sm, "tk":n_tk, "k":n_stk, "l":api.ltpData("NFO",n_sm,n_tk)['data']['ltp']})
-                                ce['sl'] = ce['l']*(1+sl_p/100)
-                    time.sleep(1)
-    else: st.warning(f"⚠️ {sym_name} ka Token nahi mila. Kripya Expiry Date check karein.")
-elif "Option Chain" in strat:
-    st.info("👆 Option Chain mein se koi leg select karein (Buy/Sell check box pe tick mark karein) taaki Payoff Graph dikh sake!")
+            m1.metric("Est. Margin Required", f"₹ {est_mgn:,.0f
