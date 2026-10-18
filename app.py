@@ -121,7 +121,7 @@ def calculate_dynamic_pop(prices, pnl_array, current_spot, days_to_expiry, v=0.1
             z1 = math.log(prices[i] / current_spot) / (v * math.sqrt(T))
             z2 = math.log(prices[i+1] / current_spot) / (v * math.sqrt(T))
             pop += (cdf(z2) - cdf(z1))
-    return round(pop * 100, 2)
+    return min(round(pop * 100, 2), 100.0)
 
 def get_exit_prices(entry, side, sl_pct, tgt_pct):
     if side == "BUY": return entry * (1 - (sl_pct / 100)), entry * (1 + (tgt_pct / 100))
@@ -139,15 +139,53 @@ strategy = st.sidebar.selectbox("📈 Select Strategy", [
     "Short Straddle (Naked Sell ⚠️)", 
     "Iron Butterfly (Hedged Straddle 🛡️)", 
     "Bullish Hedge (Long FUT + Buy PE)", 
-    "Bearish Hedge (Short FUT + Buy CE)"
+    "Bearish Hedge (Short FUT + Buy CE)",
+    "Custom Strategy Builder 🛠️" # 👇 Naya Custom Builder
 ])
 
-target_strike = st.sidebar.number_input("Center Strike Price", value=25000, step=50)
+target_strike = st.sidebar.number_input("Center Strike (For Graph)", value=25000, step=50)
 
-# Iron Butterfly ke liye extra Hedge Slider
+# ==========================================
+# 5. DYNAMIC LEGS CONFIGURATION
+# ==========================================
 hedge_dist = 0
-if "Butterfly" in strategy:
-    hedge_dist = st.sidebar.number_input("Hedge OTM Distance (Buy Options)", value=500, step=50, help="Kitne points door ka option buy karna hai loss kam karne ke liye.")
+est_margin = 0
+
+if "Custom" in strategy:
+    st.sidebar.markdown("### 🛠️ Build Your Own Strategy")
+    num_legs = st.sidebar.number_input("Kitne Legs chahiye?", min_value=1, max_value=6, value=2)
+    legs_config = []
+    
+    for i in range(num_legs):
+        st.sidebar.markdown(f"**Leg {i+1}**")
+        c1, c2, c3 = st.sidebar.columns([1.2, 1.2, 1.5])
+        l_type = c1.selectbox("Type", ["CE", "PE", "FUT"], key=f"t_{i}")
+        l_side = c2.selectbox("Side", ["BUY", "SELL"], key=f"s_{i}")
+        l_strike = c3.number_input("Strike", value=target_strike, step=50, key=f"stk_{i}")
+        
+        # Calculate offset from center strike for the engine
+        l_off = l_strike - target_strike
+        legs_config.append((l_type, l_side, l_off))
+        
+        # Rough margin estimate for custom legs
+        if l_side == "SELL" and l_type != "FUT": est_margin += (25/25) * 110000
+        elif l_side == "SELL" and l_type == "FUT": est_margin += (25/25) * 120000
+        else: est_margin += (25/25) * 10000 # Buy legs margin
+    est_margin = est_margin * 0.7 # Hedge benefit assumption
+
+elif "Butterfly" in strategy:
+    hedge_dist = st.sidebar.number_input("Hedge OTM Distance (Buy Options)", value=500, step=50)
+    legs_config = [("CE", "SELL", 0), ("PE", "SELL", 0), ("CE", "BUY", hedge_dist), ("PE", "BUY", -hedge_dist)]
+    est_margin = 55000 
+elif "Straddle" in strategy:
+    legs_config = [("CE", "SELL", 0), ("PE", "SELL", 0)]
+    est_margin = 130000
+elif "Bullish" in strategy:
+    legs_config = [("FUT", "BUY", 0), ("PE", "BUY", 0)]
+    est_margin = 45000
+else:
+    legs_config = [("FUT", "SELL", 0), ("CE", "BUY", 0)]
+    est_margin = 45000
 
 target_expiry = st.sidebar.text_input("Expiry Date", value="29DEC2026")
 lot_size = st.sidebar.number_input("Lot Size", value=25)
@@ -166,22 +204,8 @@ leg_target_percent = st.sidebar.number_input("Individual Leg Target (%)", 10, 10
 
 start_algo = st.sidebar.button("▶️ START LIVE ALGO")
 
-# ==========================================
-# 5. DYNAMIC LEGS CONFIGURATION
-# ==========================================
-if "Butterfly" in strategy:
-    # 4 Legs (Sell ATM, Buy OTM for protection)
-    legs_config = [("CE", "SELL", 0), ("PE", "SELL", 0), ("CE", "BUY", hedge_dist), ("PE", "BUY", -hedge_dist)]
-    est_margin = (lot_size/25) * 55000 
-elif "Straddle" in strategy:
-    legs_config = [("CE", "SELL", 0), ("PE", "SELL", 0)]
-    est_margin = (lot_size/25) * 130000
-elif "Bullish" in strategy:
-    legs_config = [("FUT", "BUY", 0), ("PE", "BUY", 0)]
-    est_margin = (lot_size/25) * 45000
-else:
-    legs_config = [("FUT", "SELL", 0), ("CE", "BUY", 0)]
-    est_margin = (lot_size/25) * 45000
+# Multiply base margin estimate by lots
+est_margin = (lot_size/25) * est_margin
 
 # ==========================================
 # 6. MAIN DASHBOARD LOGIC 
@@ -255,7 +279,6 @@ if all_tokens_found:
         st.markdown("---")
         st.subheader("⚡ Live MTM & Strategy Greeks")
         
-        # Dynamic Columns for Legs (2 or 4)
         cols = st.columns(len(leg_data))
         leg_metrics = [cols[i].empty() for i in range(len(leg_data))]
         
@@ -273,7 +296,6 @@ if all_tokens_found:
             pnl = 0
             tot_d, tot_t, tot_v = 0, 0, 0
             
-            # 1. Fetch LTPs and Update Metrics
             for i, leg in enumerate(leg_data):
                 if not leg["active"]:
                     leg_metrics[i].metric(label=f"🔴 {leg['side']} {leg['strike']} {leg['type']}", value="Closed")
@@ -292,7 +314,6 @@ if all_tokens_found:
             theta_metric.metric(label="Total Theta", value=f"₹ {round(tot_t * lot_size, 2)} / day")
             vega_metric.metric(label="Total Vega", value=round(tot_v, 2))
             
-            # 2. Trailing SL Check
             if pnl > max_pnl_seen: max_pnl_seen = pnl
             if max_pnl_seen >= tsl_activation:
                 dynamic_sl = max_pnl_seen - tsl_trail_by
@@ -302,9 +323,7 @@ if all_tokens_found:
                         if leg["active"]: place_order_api(leg["symbol"], leg["token"], lot_size, "SELL" if leg["side"]=="BUY" else "BUY")
                     break
 
-            # 3. Smart Exits & Rolling Adjustments
             if "Naked Sell" in strategy:
-                # Rolling is active ONLY for naked straddle
                 ce_leg = leg_data[0]
                 pe_leg = leg_data[1]
                 
@@ -354,7 +373,6 @@ if all_tokens_found:
                         place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
                         pe_leg["active"] = False 
             else:
-                # Normal target/SL exits for Hedged positions (Iron Butterfly etc.)
                 all_closed = True
                 for leg in leg_data:
                     if leg["active"]:
@@ -368,7 +386,6 @@ if all_tokens_found:
                     status_msg.error("🛑 All legs squared off. Algo stopped.")
                     break
                 
-            # 4. Total Max Loss Check
             if pnl <= max_loss:
                 status_msg.error(f"⚠️ TOTAL MAX LOSS HIT! (-₹{abs(round(pnl,2))}) Squaring off all...")
                 for leg in leg_data:
