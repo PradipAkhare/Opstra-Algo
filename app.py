@@ -162,73 +162,71 @@ leg_target_percent = st.sidebar.number_input("Individual Leg Target (%)", 10, 10
 start_algo = st.sidebar.button("▶️ START LIVE ALGO")
 
 # ==========================================
-# 5. MAIN DASHBOARD LOGIC
+# 5. MAIN DASHBOARD LOGIC (ANALYSIS & ALGO)
 # ==========================================
-if start_algo:
-    ce_token, ce_symbol = get_token_info("NIFTY", target_strike, "CE", target_expiry)
-    pe_token, pe_symbol = get_token_info("NIFTY", target_strike, "PE", target_expiry)
-    
-    if ce_token and pe_token:
-        ce_data = smartApi.ltpData("NFO", ce_symbol, ce_token)
-        pe_data = smartApi.ltpData("NFO", pe_symbol, pe_token)
-        
-        entry_ce = ce_data['data']['ltp']
-        entry_pe = pe_data['data']['ltp']
-        entry_prem = entry_ce + entry_pe
-        
-        st.success("✅ Orders Placed Successfully!")
-        
-        # --- TRADE SUMMARY METRICS ---
-        pop_value = calculate_pop(target_strike, entry_prem, days_to_expiry)
-        est_margin = estimate_margin(lot_size)
-        max_profit = entry_prem * lot_size
-        
-        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-        m_col1.metric("Est. Margin Required", f"₹ {est_margin:,.0f}")
-        m_col2.metric("Total Premium Collected", f"₹ {round(entry_prem, 2)}")
-        m_col3.metric("Max Profit (At Expiry)", f"₹ {round(max_profit, 2)}")
-        m_col4.metric("Probability of Profit (POP)", f"{pop_value} %")
-        
-        # --- INTERACTIVE GRAPH DRAW KARNA (PLOTLY) ---
-        st.subheader("📉 Expiry & T+0 Payoff Graph")
-        prices = list(range(int(target_strike) - 2500, int(target_strike) + 2500, 10))
-        pnl_expiry = []
-        pnl_t0 = []
-        
-        for p in prices:
-            ce_exp = entry_ce - max(0, p - target_strike)
-            pe_exp = entry_pe - max(0, target_strike - p)
-            pnl_expiry.append((ce_exp + pe_exp) * lot_size)
-            
-            ce_t0_price = bs_price(p, target_strike, days_to_expiry, "CE")
-            pe_t0_price = bs_price(p, target_strike, days_to_expiry, "PE")
-            ce_t0_pnl = entry_ce - ce_t0_price
-            pe_t0_pnl = entry_pe - pe_t0_price
-            pnl_t0.append((ce_t0_pnl + pe_t0_pnl) * lot_size)
-            
-        fig = go.Figure()
-        
-        # Profit Area (Green)
-        pnl_profit = [p if p >= 0 else 0 for p in pnl_expiry]
-        fig.add_trace(go.Scatter(x=prices, y=pnl_profit, mode='none', fill='tozeroy', fillcolor='rgba(0, 128, 0, 0.3)', showlegend=False))
-                                 
-        # Loss Area (Red)
-        pnl_loss = [p if p < 0 else 0 for p in pnl_expiry]
-        fig.add_trace(go.Scatter(x=prices, y=pnl_loss, mode='none', fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.3)', showlegend=False))
+ce_token, ce_symbol = get_token_info("NIFTY", target_strike, "CE", target_expiry)
+pe_token, pe_symbol = get_token_info("NIFTY", target_strike, "PE", target_expiry)
 
-        # Expiry Line (Dashed Blue)
-        fig.add_trace(go.Scatter(x=prices, y=pnl_expiry, mode='lines', name='Expiry Payoff', line=dict(color='blue', dash='dash')))
-                                 
-        # T+0 Line (Solid Orange)
-        fig.add_trace(go.Scatter(x=prices, y=pnl_t0, mode='lines', name='T+0 Payoff (Today)', line=dict(color='darkorange', width=3)))
-                                 
-        fig.update_layout(hovermode="x unified", xaxis_title="Nifty Price", yaxis_title="P&L (₹)", title="Cursor ghumayein aur P&L dekhein (T+0 vs Expiry)")
-        fig.add_vline(x=target_strike, line_dash="dot", line_color="red", annotation_text="Strike")
-        fig.add_hline(y=0, line_color="black")
+if ce_token and pe_token:
+    
+    # --- PART 1: PRE-TRADE ANALYSIS (Humesha Dikhega) ---
+    ce_data = smartApi.ltpData("NFO", ce_symbol, ce_token)
+    pe_data = smartApi.ltpData("NFO", pe_symbol, pe_token)
+    
+    entry_ce = ce_data['data']['ltp']
+    entry_pe = pe_data['data']['ltp']
+    entry_prem = entry_ce + entry_pe
+    
+    st.subheader("📊 Pre-Trade Strategy Analysis")
+    
+    # Trade Summary Metrics
+    pop_value = calculate_pop(target_strike, entry_prem, days_to_expiry)
+    est_margin = estimate_margin(lot_size)
+    max_profit = entry_prem * lot_size
+    
+    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+    m_col1.metric("Est. Margin Required", f"₹ {est_margin:,.0f}")
+    m_col2.metric("Total Premium (Live)", f"₹ {round(entry_prem, 2)}")
+    m_col3.metric("Max Profit (At Expiry)", f"₹ {round(max_profit, 2)}")
+    m_col4.metric("Probability of Profit (POP)", f"{pop_value} %")
+    
+    # Interactive Graph
+    prices = list(range(int(target_strike) - 2500, int(target_strike) + 2500, 10))
+    pnl_expiry = []
+    pnl_t0 = []
+    
+    for p in prices:
+        ce_exp = entry_ce - max(0, p - target_strike)
+        pe_exp = entry_pe - max(0, target_strike - p)
+        pnl_expiry.append((ce_exp + pe_exp) * lot_size)
         
-        st.plotly_chart(fig, use_container_width=True)
+        ce_t0_price = bs_price(p, target_strike, days_to_expiry, "CE")
+        pe_t0_price = bs_price(p, target_strike, days_to_expiry, "PE")
+        ce_t0_pnl = entry_ce - ce_t0_price
+        pe_t0_pnl = entry_pe - pe_t0_price
+        pnl_t0.append((ce_t0_pnl + pe_t0_pnl) * lot_size)
         
-        # --- LIVE P&L TRACKER UI ---
+    fig = go.Figure()
+    
+    pnl_profit = [p if p >= 0 else 0 for p in pnl_expiry]
+    fig.add_trace(go.Scatter(x=prices, y=pnl_profit, mode='none', fill='tozeroy', fillcolor='rgba(0, 128, 0, 0.3)', showlegend=False))
+                             
+    pnl_loss = [p if p < 0 else 0 for p in pnl_expiry]
+    fig.add_trace(go.Scatter(x=prices, y=pnl_loss, mode='none', fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.3)', showlegend=False))
+
+    fig.add_trace(go.Scatter(x=prices, y=pnl_expiry, mode='lines', name='Expiry Payoff', line=dict(color='blue', dash='dash')))
+    fig.add_trace(go.Scatter(x=prices, y=pnl_t0, mode='lines', name='T+0 Payoff (Today)', line=dict(color='darkorange', width=3)))
+                             
+    fig.update_layout(hovermode="x unified", xaxis_title="Nifty Price", yaxis_title="P&L (₹)", title="Cursor ghumayein aur P&L dekhein (T+0 vs Expiry)")
+    fig.add_vline(x=target_strike, line_dash="dot", line_color="red", annotation_text="Strike")
+    fig.add_hline(y=0, line_color="black")
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # --- PART 2: LIVE ALGO EXECUTION (Button dabne par chalega) ---
+    if start_algo:
+        st.success("✅ Algo Started & Orders Placed Successfully!")
+        
         st.markdown("---")
         st.subheader("⚡ Live MTM & Option Greeks")
         
@@ -244,7 +242,6 @@ if start_algo:
         
         status_msg = st.empty()
         
-        # 👇 SL & Target Calculations 👇
         ce_sl_price = entry_ce * (1 + (leg_sl_percent / 100))
         pe_sl_price = entry_pe * (1 + (leg_sl_percent / 100))
         ce_target_price = entry_ce * (1 - (leg_target_percent / 100))
@@ -254,7 +251,6 @@ if start_algo:
         pe_active = True
         max_pnl_seen = 0 
         
-        # Live Update Loop
         while True:
             live_ce = smartApi.ltpData("NFO", ce_symbol, ce_token)['data']['ltp']
             live_pe = smartApi.ltpData("NFO", pe_symbol, pe_token)['data']['ltp']
@@ -271,4 +267,96 @@ if start_algo:
             total_vega = ce_vega + pe_vega
             
             ce_metric.metric(label="Call (CE) Live", value=f"₹ {live_ce}")
-            pe_metric.metric
+            pe_metric.metric(label="Put (PE) Live", value=f"₹ {live_pe}")
+            pnl_metric.metric(label="Total MTM P&L", value=f"₹ {round(pnl, 2)}", delta=round(pnl, 2))
+            
+            delta_metric.metric(label="Total Delta", value=round(total_delta, 2))
+            theta_metric.metric(label="Total Theta (Time Decay)", value=f"₹ {round(total_theta * lot_size, 2)} / day")
+            vega_metric.metric(label="Total Vega (Vol Impact)", value=round(total_vega, 2))
+            
+            # Trailing SL Check
+            if pnl > max_pnl_seen:
+                max_pnl_seen = pnl
+                
+            if max_pnl_seen >= tsl_activation:
+                dynamic_sl = max_pnl_seen - tsl_trail_by
+                if pnl <= dynamic_sl:
+                    status_msg.error(f"🛡️ TRAILING SL HIT! Protected Profit at ₹{round(pnl, 2)}. Squaring off...")
+                    if ce_active: place_exit_order(ce_symbol, ce_token, lot_size)
+                    if pe_active: place_exit_order(pe_symbol, pe_token, lot_size)
+                    break
+
+            # Rolling Adjustments
+            if ce_active:
+                if live_ce >= ce_sl_price:
+                    st.toast(f"⚠️ CE Stop Loss Hit at ₹{live_ce}! Adjusting Position...")
+                    place_exit_order(ce_symbol, ce_token, lot_size)
+                    ce_active = False 
+                    
+                    if pe_active:
+                        place_exit_order(pe_symbol, pe_token, lot_size)
+                        pe_active = False
+                        st.toast(f"🔄 PE also booked to roll up!")
+                    
+                    new_strike = target_strike + 500
+                    new_pe_token, new_pe_symbol = get_token_info("NIFTY", new_strike, "PE", target_expiry)
+                    
+                    if new_pe_token:
+                        place_new_sell_order(new_pe_symbol, new_pe_token, lot_size)
+                        st.toast(f"✅ Rolled Up: Sold Naya Put {new_strike} PE!")
+                        pe_active = True
+                        pe_symbol = new_pe_symbol
+                        pe_token = new_pe_token
+                        live_new_pe = smartApi.ltpData("NFO", pe_symbol, pe_token)['data']['ltp']
+                        pe_sl_price = live_new_pe * (1 + (leg_sl_percent / 100))
+                        pe_target_price = live_new_pe * (1 - (leg_target_percent / 100))
+                        
+                elif live_ce <= ce_target_price:
+                    st.toast(f"🎯 CE Target Hit (90% Profit)! Exiting CE...")
+                    place_exit_order(ce_symbol, ce_token, lot_size)
+                    ce_active = False 
+
+            if pe_active:
+                if live_pe >= pe_sl_price:
+                    st.toast(f"⚠️ PE Stop Loss Hit at ₹{live_pe}! Adjusting Position...")
+                    place_exit_order(pe_symbol, pe_token, lot_size)
+                    pe_active = False 
+                    
+                    if ce_active:
+                        place_exit_order(ce_symbol, ce_token, lot_size)
+                        ce_active = False
+                        st.toast(f"🔄 CE also booked to roll down!")
+                    
+                    new_strike = target_strike - 500 
+                    new_ce_token, new_ce_symbol = get_token_info("NIFTY", new_strike, "CE", target_expiry)
+                    
+                    if new_ce_token:
+                        place_new_sell_order(new_ce_symbol, new_ce_token, lot_size)
+                        st.toast(f"✅ Rolled Down: Sold Naya Call {new_strike} CE!")
+                        ce_active = True
+                        ce_symbol = new_ce_symbol
+                        ce_token = new_ce_token
+                        live_new_ce = smartApi.ltpData("NFO", ce_symbol, ce_token)['data']['ltp']
+                        ce_sl_price = live_new_ce * (1 + (leg_sl_percent / 100))
+                        ce_target_price = live_new_ce * (1 - (leg_target_percent / 100))
+                        
+                elif live_pe <= pe_target_price:
+                    st.toast(f"🎯 PE Target Hit (90% Profit)! Exiting PE...")
+                    place_exit_order(pe_symbol, pe_token, lot_size)
+                    pe_active = False 
+            
+            if not ce_active and not pe_active:
+                status_msg.error("🛑 Both legs squared off. Algo stopped.")
+                break
+                
+            # Total Max Loss Check
+            if pnl <= max_loss:
+                status_msg.error(f"⚠️ TOTAL MAX LOSS HIT! (-₹{abs(round(pnl,2))}) Squaring off all...")
+                if ce_active: place_exit_order(ce_symbol, ce_token, lot_size)
+                if pe_active: place_exit_order(pe_symbol, pe_token, lot_size)
+                break
+                
+            time.sleep(1)
+            
+else:
+    st.warning("⚠️ Strike Price ya Expiry Date valid nahi hai. Kripya check karein.")
