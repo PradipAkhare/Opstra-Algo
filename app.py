@@ -170,87 +170,88 @@ est_margin = 0
 legs_config = []
 
 if "Option Chain" in strategy:
-    st.markdown("### ⛓️ Advanced Option Chain (Live OI & Trend)")
-    st.caption("☑️ Checkboxes par tick karein aur Strategy banayein (Greeks & OI ke sath!)")
-    
-    # Building Option Chain Data
-    chain_data = []
-    for strike in range(int(target_strike) - 500, int(target_strike) + 550, 50):
-        # Calculate Greeks
-        ce_d, ce_t, ce_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "CE")
-        pe_d, pe_t, pe_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "PE")
+    # 👇 Naya Expander add kiya hai jisse Show/Hide kar sakte hain 👇
+    with st.expander("⛓️ Advanced Option Chain (Click to Show/Hide)", expanded=True):
+        st.caption("☑️ Checkboxes par tick karein aur Strategy banayein (Greeks & OI ke sath!)")
         
-        # Simulate OI (Highest at ATM)
-        dist = abs(strike - target_strike)
-        ce_oi = int(100000 * math.exp(-(dist**2)/100000))
-        pe_oi = int(100000 * math.exp(-(dist**2)/100000))
-        
-        # 👇 SMART BUILD-UP TREND LOGIC 👇
-        if strike > target_strike:
-            ce_trend = "🔴 Short Buildup" # OTM Calls are usually written
-            pe_trend = "🟢 Long Buildup"  # ITM Puts
-        elif strike < target_strike:
-            ce_trend = "🚀 Short Covering" # ITM Calls
-            pe_trend = "🔴 Short Buildup"  # OTM Puts are usually written
-        else:
-            ce_trend = "🔴 Short Buildup" # ATM Straddle Selling
-            pe_trend = "🔴 Short Buildup"
+        # Building Option Chain Data
+        chain_data = []
+        for strike in range(int(target_strike) - 500, int(target_strike) + 550, 50):
+            # Calculate Greeks
+            ce_d, ce_t, ce_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "CE")
+            pe_d, pe_t, pe_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "PE")
             
-        chain_data.append({
-            "Buy CE": False, "Sell CE": False,
-            "CE Trend": ce_trend,
-            "CE OI": ce_oi, 
-            "CE Theta": ce_t, "CE Delta": ce_d, 
-            "STRIKE": strike, 
-            "PE Delta": pe_d, "PE Theta": pe_t, 
-            "PE OI": pe_oi,
-            "PE Trend": pe_trend,
-            "Buy PE": False, "Sell PE": False
-        })
-        
-    df_chain = pd.DataFrame(chain_data)
-    
-    # 👇 CONDITIONAL FORMATTING (PROGRESS BARS & TEXT) 👇
-    edited_chain = st.data_editor(
-        df_chain, 
-        hide_index=True, 
-        use_container_width=True,
-        column_config={
-            "STRIKE": st.column_config.NumberColumn("🎯 STRIKE", help="Center Strike", required=True),
-            "Buy CE": st.column_config.CheckboxColumn("🟢 Buy CE"),
-            "Sell CE": st.column_config.CheckboxColumn("🔴 Sell CE"),
-            "CE Trend": st.column_config.TextColumn("📈 CE Trend"),
-            "CE OI": st.column_config.ProgressColumn("📊 CE OI Bar", format="%d", min_value=0, max_value=100000),
-            "PE OI": st.column_config.ProgressColumn("📊 PE OI Bar", format="%d", min_value=0, max_value=100000),
-            "PE Trend": st.column_config.TextColumn("📉 PE Trend"),
-            "Buy PE": st.column_config.CheckboxColumn("🟢 Buy PE"),
-            "Sell PE": st.column_config.CheckboxColumn("🔴 Sell PE"),
-        }
-    )
-    
-    has_sell = False
-    has_buy = False
-    for index, row in edited_chain.iterrows():
-        strike = int(row['STRIKE'])
-        offset = strike - target_strike
-        
-        if row['Buy CE']: 
-            legs_config.append(("CE", "BUY", offset))
-            has_buy = True; est_margin += 10000
-        if row['Sell CE']: 
-            legs_config.append(("CE", "SELL", offset))
-            has_sell = True; est_margin += 110000
-        if row['Buy PE']: 
-            legs_config.append(("PE", "BUY", offset))
-            has_buy = True; est_margin += 10000
-        if row['Sell PE']: 
-            legs_config.append(("PE", "SELL", offset))
-            has_sell = True; est_margin += 110000
+            # Simulate OI (Highest at ATM)
+            dist = abs(strike - target_strike)
+            ce_oi = int(100000 * math.exp(-(dist**2)/100000))
+            pe_oi = int(100000 * math.exp(-(dist**2)/100000))
             
-    if has_sell and has_buy and len(legs_config) > 1:
-        est_margin = est_margin * 0.35  
-    elif len(legs_config) > 1:
-        est_margin = est_margin * 0.85
+            # 👇 SMART BUILD-UP TREND LOGIC 👇
+            if strike > target_strike:
+                ce_trend = "🔴 Short Buildup" # OTM Calls are usually written
+                pe_trend = "🟢 Long Buildup"  # ITM Puts
+            elif strike < target_strike:
+                ce_trend = "🚀 Short Covering" # ITM Calls
+                pe_trend = "🔴 Short Buildup"  # OTM Puts are usually written
+            else:
+                ce_trend = "🔴 Short Buildup" # ATM Straddle Selling
+                pe_trend = "🔴 Short Buildup"
+                
+            chain_data.append({
+                "Buy CE": False, "Sell CE": False,
+                "CE Trend": ce_trend,
+                "CE OI": ce_oi, 
+                "CE Theta": ce_t, "CE Delta": ce_d, 
+                "STRIKE": strike, 
+                "PE Delta": pe_d, "PE Theta": pe_t, 
+                "PE OI": pe_oi,
+                "PE Trend": pe_trend,
+                "Buy PE": False, "Sell PE": False
+            })
+            
+        df_chain = pd.DataFrame(chain_data)
+        
+        # 👇 CONDITIONAL FORMATTING (PROGRESS BARS & TEXT) 👇
+        edited_chain = st.data_editor(
+            df_chain, 
+            hide_index=True, 
+            use_container_width=True,
+            column_config={
+                "STRIKE": st.column_config.NumberColumn("🎯 STRIKE", help="Center Strike", required=True),
+                "Buy CE": st.column_config.CheckboxColumn("🟢 Buy CE"),
+                "Sell CE": st.column_config.CheckboxColumn("🔴 Sell CE"),
+                "CE Trend": st.column_config.TextColumn("📈 CE Trend"),
+                "CE OI": st.column_config.ProgressColumn("📊 CE OI Bar", format="%d", min_value=0, max_value=100000),
+                "PE OI": st.column_config.ProgressColumn("📊 PE OI Bar", format="%d", min_value=0, max_value=100000),
+                "PE Trend": st.column_config.TextColumn("📉 PE Trend"),
+                "Buy PE": st.column_config.CheckboxColumn("🟢 Buy PE"),
+                "Sell PE": st.column_config.CheckboxColumn("🔴 Sell PE"),
+            }
+        )
+        
+        has_sell = False
+        has_buy = False
+        for index, row in edited_chain.iterrows():
+            strike = int(row['STRIKE'])
+            offset = strike - target_strike
+            
+            if row['Buy CE']: 
+                legs_config.append(("CE", "BUY", offset))
+                has_buy = True; est_margin += 10000
+            if row['Sell CE']: 
+                legs_config.append(("CE", "SELL", offset))
+                has_sell = True; est_margin += 110000
+            if row['Buy PE']: 
+                legs_config.append(("PE", "BUY", offset))
+                has_buy = True; est_margin += 10000
+            if row['Sell PE']: 
+                legs_config.append(("PE", "SELL", offset))
+                has_sell = True; est_margin += 110000
+                
+        if has_sell and has_buy and len(legs_config) > 1:
+            est_margin = est_margin * 0.35  
+        elif len(legs_config) > 1:
+            est_margin = est_margin * 0.85
 
 elif "Custom" in strategy:
     st.sidebar.markdown("### 🛠️ Build Your Own Strategy")
