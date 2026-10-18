@@ -14,7 +14,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Opstra Clone: Universal Pro Dashboard + Historical Date Backtest")
+st.title("🚀 Opstra Clone: Universal Pro Dashboard + Live Time & Payoff Graph")
 
 api_key, client_id, password, totp_secret = "A04oCs0I", "V551760", "2015", "4YILABJ5MTMUTRC45SUPNKANOU"
 
@@ -289,7 +289,7 @@ if "Option Chain" in strat:
                 if r['Sell PE']: legs.append(("PE","SELL",off))
 
 # ==========================================
-# 7. EXECUTION & ADJUSTMENT LOGS
+# 7. EXECUTION, TIME & DYNAMIC ADJUSTMENT GRAPH
 # ==========================================
 if start:
     if not legs:
@@ -309,13 +309,23 @@ if start:
                 l['tg'] = l['e']*(1+tgt_p/100) if l['s']=="BUY" else l['e']*(1-tgt_p/100)
                 
             adj_logs = []
-            with st.expander("⚡ Live MTM, Adjustments & Adjustment Log", expanded=True):
+            with st.expander("⚡ Live MTM, Time Clock, Adjustments & Dynamic Graph", expanded=True):
+                # Live Clock Placeholder at Top of Execution
+                clock_placeholder = st.empty()
+                
                 cs = st.columns(len(ld))
                 lms = [cs[i].empty() for i in range(len(ld))]
                 g1, g2, g3, g4 = st.columns(4)
                 pm, dm, tm, vm, msg = g1.empty(), g2.empty(), g3.empty(), g4.empty(), st.empty()
+                
+                # Dynamic Payoff Graph Placeholder inside Execution
+                graph_placeholder = st.empty()
+                
                 mpnl = 0
                 for step in range(5):
+                    curr_time = time.strftime("%H:%M:%S")
+                    clock_placeholder.markdown(f"### 🕒 Execution Timestamp: **{curr_time}** (Step {step+1}/5)")
+                    
                     pnl, td, tt, tv = 0, 0, 0, 0
                     for i, l in enumerate(ld):
                         if not l['a']: lms[i].metric(f"🔴 {l['s']} {l['k']} {l['t']}", "Closed"); continue
@@ -333,23 +343,44 @@ if start:
                     tm.metric("Total Theta", f"₹ {tt*lot_size:.2f}/day")
                     vm.metric("Total Vega", f"{tv:.2f}")
                     
+                    # Check for adjustments and redraw dynamic graph after adjustment
                     if "Naked Sell" in strat and len(ld)>=2:
                         ce, pe_l = ld[0], ld[1]
                         if ce['a'] and ce['l']>=ce['sl']:
                             ce['a'] = False
-                            adj_logs.append({"Time": time.strftime("%H:%M:%S"), "Action": "CE SL Hit - Adjusted", "Details": f"Closed {ce['sm']}, Rolled to OTM"})
+                            adj_logs.append({"Time": curr_time, "Action": "CE SL Hit - Adjusted", "Details": f"Closed {ce['sm']}, Rolled to OTM"})
                             n_stk = tgt_stk + (10*stk_step)
                             n_tk, n_sm, n_ex = get_token(sym_name, n_stk, "PE", tgt_exp)
                             if n_tk:
                                 ld.append({"t": "PE", "s": "SELL", "k": n_stk, "tk": n_tk, "sm": n_sm, "a": True, "ex": n_ex, "e": 50.0, "sl": 75.0, "tg": 5.0})
                         if pe_l['a'] and pe_l['l']>=pe_l['sl']:
                             pe_l['a'] = False
-                            adj_logs.append({"Time": time.strftime("%H:%M:%S"), "Action": "PE SL Hit - Adjusted", "Details": f"Closed {pe_l['sm']}, Rolled to OTM"})
-    
+                            adj_logs.append({"Time": curr_time, "Action": "PE SL Hit - Adjusted", "Details": f"Closed {pe_l['sm']}, Rolled to OTM"})
                             n_stk = tgt_stk - (10*stk_step)
                             n_tk, n_sm, n_ex = get_token(sym_name, n_stk, "CE", tgt_exp)
                             if n_tk:
                                 ld.append({"t": "CE", "s": "SELL", "k": n_stk, "tk": n_tk, "sm": n_sm, "a": True, "ex": n_ex, "e": 50.0, "sl": 75.0, "tg": 5.0})
+                    
+                    # Render Live Updated Payoff Graph during execution/adjustments
+                    pxs = list(range(int(tgt_stk*0.85), int(tgt_stk*1.15), max(1, int(tgt_stk*0.3/200))))
+                    pe, pt0 = [], []
+                    for p in pxs:
+                        ev, tv = 0, 0
+                        for l in ld:
+                            if l['a']:
+                                iv_val = (sim_iv/100.0) if "Backtest" in mode else 0.15
+                                ev += calc_pnl(p, l['k'], l['e'], l['t'], l['s'], 0, False)
+                                tv += (bs_price(p, l['k'], dte, l['t'], v=iv_val) - l['e']) if l['t']!="FUT" else (p - l['e'] if l['s']=="BUY" else l['e'] - p)
+                        pe.append(ev*lot_size); pt0.append(tv*lot_size)
+                    
+                    fig_live = go.Figure()
+                    fig_live.add_trace(go.Scatter(x=pxs, y=[x if x>=0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(0,128,0,0.3)', showlegend=False))
+                    fig_live.add_trace(go.Scatter(x=pxs, y=[x if x<0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(255,0,0,0.3)', showlegend=False))
+                    fig_live.add_trace(go.Scatter(x=pxs, y=pe, mode='lines', name='Adjusted Expiry Payoff', line=dict(color='blue', dash='dash')))
+                    fig_live.add_trace(go.Scatter(x=pxs, y=pt0, mode='lines', name='Adjusted T+0 Payoff', line=dict(color='darkorange', width=3)))
+                    fig_live.add_vline(x=tgt_stk, line_dash="dot", line_color="red", annotation_text="ATM")
+                    fig_live.add_hline(y=0, line_color="black")
+                    graph_placeholder.plotly_chart(fig_live, use_container_width=True, key=f"live_graph_{step}")
                     
                     if adj_logs:
                         st.markdown("### 📝 Adjustment Audit Trail")
