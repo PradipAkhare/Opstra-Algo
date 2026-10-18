@@ -14,7 +14,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Opstra Clone: Universal Pro Dashboard + Frozen Historical Backtest")
+st.title("🚀 Opstra Clone: Universal Pro Dashboard + Historical Date Backtest")
 
 api_key, client_id, password, totp_secret = "A04oCs0I", "V551760", "2015", "4YILABJ5MTMUTRC45SUPNKANOU"
 
@@ -141,7 +141,7 @@ stk_step = st.sidebar.number_input("Strike Step", value=max(c_step, 10), key=ste
 if "Backtest" in mode:
     st.sidebar.markdown("### 📅 Select Historical Date")
     selected_backtest_date = st.sidebar.date_input("Backtest Date", value=datetime.date.today() - datetime.timedelta(days=7))
-    st.sidebar.info(f"🔒 Data frozen for date: **{selected_backtest_date}**")
+    st.sidebar.caption(f"Testing for market condition on: **{selected_backtest_date}**")
     tgt_exp = st.sidebar.text_input("Manual Expiry Date (e.g. 24SEP2026)", value="24SEP2026").upper()
 else:
     tgt_exp = st.sidebar.selectbox("Expiry Date", options=exps, index=0, key=exp_key)
@@ -152,4 +152,207 @@ dte = st.sidebar.number_input("Days to Expiry", value=3)
 if "Backtest" in mode:
     st.sidebar.markdown("---")
     st.sidebar.subheader("🧪 Simulation Controls")
-    sim_spot_shift = st.sidebar.slider("Simulated Spot Shift (%)", -1
+    sim_spot_shift = st.sidebar.slider("Simulated Spot Shift (%)", -15, 15, 0, step=1)
+    sim_iv = st.sidebar.slider("Simulated IV (%)", 5, 50, 15, step=1)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🛡️ Risk Management")
+m_loss = st.sidebar.number_input("Overall Max Loss (₹)", value=-500)
+tsl_act = st.sidebar.number_input("Trailing SL Activate (₹)", value=500)
+tsl_trl = st.sidebar.number_input("Trail SL by (₹)", value=200)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎯 Leg-Wise Settings")
+sl_p = st.sidebar.number_input("Leg SL (%)", 10, 200, 50, step=10)
+tgt_p = st.sidebar.number_input("Leg Target (%)", 10, 100, 90, step=10)
+start = st.sidebar.button("▶️ START ALGO / BACKTEST")
+
+# ==========================================
+# 4. LEGS CONFIGURATION
+# ==========================================
+est_mgn, legs = 0, []
+
+if "Option Chain" in strat: pass
+elif "Custom" in strat:
+    st.sidebar.markdown("### 🛠️ Build Your Own Strategy")
+    nl = st.sidebar.number_input("Kitne Legs chahiye?", 1, 6, 2)
+    hsf, hb = False, False
+    for i in range(nl):
+        c1, c2, c3 = st.sidebar.columns([1.2, 1.2, 1.5])
+        t = c1.selectbox("Type", ["CE","PE","FUT"], key=f"t{i}_{sym_name}_{strat}")
+        sd = c2.selectbox("Side", ["BUY","SELL"], key=f"s{i}_{sym_name}_{strat}")
+        sk = c3.number_input("Strike", value=tgt_stk, step=stk_step, key=f"k{i}_{sym_name}_{strat}")
+        legs.append((t, sd, sk-tgt_stk))
+        if t=="FUT" or sd=="SELL": est_mgn+=120000; hsf=True
+        else: est_mgn+=10000; hb=True
+    if nl>1 and hsf and hb: est_mgn*=0.35
+    elif nl>1: est_mgn*=0.85
+elif "Butterfly" in strat:
+    hd = st.sidebar.number_input("Hedge OTM Distance", value=10*stk_step, step=int(stk_step), key=f"hd_{sym_name}_{strat}")
+    legs = [("CE","SELL",0),("PE","SELL",0),("CE","BUY",hd),("PE","BUY",-hd)]; est_mgn=55000
+elif "Straddle" in strat: legs = [("CE","SELL",0),("PE","SELL",0)]; est_mgn=130000
+elif "Bullish" in strat: legs = [("FUT","BUY",0),("PE","BUY",0)]; est_mgn=45000
+else: legs = [("FUT","SELL",0),("CE","BUY",0)]; est_mgn=45000
+
+est_mgn = (lot_size/25)*est_mgn
+eff_spot = tgt_stk * (1 + sim_spot_shift / 100.0) if "Backtest" in mode else tgt_stk
+
+# ==========================================
+# 5. PAYOFF GRAPH (TOP)
+# ==========================================
+ld, aok = [], True
+if "Option Chain" not in strat and legs:
+    for t, sd, off in legs:
+        tk, sm, ex = get_token(sym_name, tgt_stk+off, t, tgt_exp)
+        if tk: ld.append({"t":t, "s":sd, "k":tgt_stk+off, "tk":tk, "sm":sm, "a":True, "ex":ex})
+        else: aok = False
+
+    if aok and ld:
+        for l in ld:
+            if "Backtest" in mode:
+                l['e'] = bs_price(tgt_stk, l['k'], dte, "CE" if l['t']=="CE" else ("PE" if l['t']=="PE" else tgt_stk), v=sim_iv/100.0) if l['t']!="FUT" else tgt_stk
+            else:
+                l['e'] = safe_ltp(l['ex'], l['sm'], l['tk'])
+        
+        pxs = list(range(int(tgt_stk*0.85), int(tgt_stk*1.15), max(1, int(tgt_stk*0.3/200))))
+        pe, pt0 = [], []
+        for p in pxs:
+            ev, tv = 0, 0
+            for l in ld:
+                iv_val = (sim_iv/100.0) if "Backtest" in mode else 0.15
+                ev += calc_pnl(p, l['k'], l['e'], l['t'], l['s'], 0, False)
+                tv += (bs_price(p, l['k'], dte, l['t'], v=iv_val) - l['e']) if l['t']!="FUT" else (p - l['e'] if l['s']=="BUY" else l['e'] - p)
+            pe.append(ev*lot_size); pt0.append(tv*lot_size)
+            
+        with st.expander(f"📊 Payoff Analysis for Date: {selected_backtest_date if 'Backtest' in mode else 'Live Market'}", expanded=True):
+            pop = get_pop(pxs, pt0, tgt_stk, dte) if ld else 0.0
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Est. Margin", f"₹ {est_mgn:,.0f}")
+            m2.metric("Max Profit", "Unlimited 🚀" if (pe[-1]-pe[-2]>1 or pe[0]-pe[1]>1) else f"₹ {max(pe):.2f}")
+            m3.metric("Max Loss", "Unlimited ⚠️" if (pe[-1]-pe[-2]<-1 or pe[0]-pe[1]<-1) else f"₹ {min(pe):.2f}")
+            m4.metric("POP", f"{pop} %")
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=pxs, y=[x if x>=0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(0,128,0,0.3)', showlegend=False))
+            fig.add_trace(go.Scatter(x=pxs, y=[x if x<0 else 0 for x in pe], fill='tozeroy', fillcolor='rgba(255,0,0,0.3)', showlegend=False))
+            fig.add_trace(go.Scatter(x=pxs, y=pe, mode='lines', name='Expiry Payoff', line=dict(color='blue', dash='dash')))
+            fig.add_trace(go.Scatter(x=pxs, y=pt0, mode='lines', name='T+0 (Simulated / Live)', line=dict(color='darkorange', width=3)))
+            fig.add_vline(x=eff_spot, line_dash="dash", line_color="green", annotation_text="Eff Spot")
+            fig.add_vline(x=tgt_stk, line_dash="dot", line_color="red", annotation_text="ATM")
+            fig.add_hline(y=0, line_color="black")
+            st.plotly_chart(fig, use_container_width=True)
+
+# ==========================================
+# 6. OPTION CHAIN BUILDER
+# ==========================================
+if "Option Chain" in strat:
+    with st.expander(f"⛓️ {sym_name} Option Chain", expanded=True):
+        st.markdown(f"#### 📍 {sym_name} ATM: **{tgt_stk}**")
+        view_mode = st.radio("👁️ View Mode", ["Compact View (LTP, OI, Chg OI, Strike, Build-up)", "Expand All Columns (Greeks & Details)"], horizontal=True)
+
+        ch_data = []
+        iv_val = (sim_iv/100.0) if "Backtest" in mode else 0.15
+        for s in range(int(tgt_stk - 10*stk_step), int(tgt_stk + 11*stk_step), int(stk_step)):
+            if s <= 0: continue
+            cd, ct, cv = bs_greeks(eff_spot, s, dte, "CE", v=iv_val)
+            pd_d, pt, pv = bs_greeks(eff_spot, s, dte, "PE", v=iv_val)
+            cp = round(bs_price(eff_spot, s, dte, "CE", v=iv_val), 2)
+            pp = round(bs_price(eff_spot, s, dte, "PE", v=iv_val), 2)
+            oi = int(100000*math.exp(-((s-eff_spot)**2)/100000))
+            choi = int(oi * 0.05)
+            
+            ce_build = "🔴 Short Buildup" if s >= eff_spot else "🚀 Short Covering"
+            pe_build = "🟢 Long Buildup" if s > eff_spot else "🔴 Short Buildup"
+            
+            if "Compact" in view_mode:
+                ch_data.append({"Buy CE": False, "Sell CE": False, "CE LTP": cp, "CE OI": oi, "CE ChgOI": choi, "CE Build-up": ce_build, "Spot": "🎯 ATM" if s == tgt_stk else "", "STRIKE": s, "PE Build-up": pe_build, "PE ChgOI": choi, "PE OI": oi, "PE LTP": pp, "Buy PE": False, "Sell PE": False})
+            else:
+                ch_data.append({"Buy CE": False, "Sell CE": False, "CE LTP": cp, "CE OI": oi, "CE ChgOI": choi, "CE Build-up": ce_build, "CE Th": ct, "CE Dl": cd, "Spot": "🎯 ATM" if s == tgt_stk else "", "STRIKE": s, "PE Dl": pd_d, "PE Th": pt, "PE OI": oi, "PE ChgOI": choi, "PE Build-up": pe_build, "PE LTP": pp, "Buy PE": False, "Sell PE": False})
+        
+        df_ch = pd.DataFrame(ch_data)
+        def style_ch(row):
+            res = []
+            for c in df_ch.columns:
+                if row['STRIKE']==tgt_stk: res.append('background-color:rgba(255,215,0,0.2);font-weight:bold;')
+                elif row['STRIKE']<tgt_stk and 'CE' in c: res.append('background-color:rgba(135,206,250,0.06);')
+                elif row['STRIKE']>tgt_stk and 'PE' in c: res.append('background-color:rgba(135,206,250,0.06);')
+                else: res.append('')
+            return res
+
+        if not df_ch.empty:
+            ed_ch = st.data_editor(df_ch.style.apply(style_ch, axis=1), hide_index=True, use_container_width=True)
+            for _, r in ed_ch.iterrows():
+                off = int(r['STRIKE']) - tgt_stk
+                if r['Buy CE']: legs.append(("CE","BUY",off))
+                if r['Sell CE']: legs.append(("CE","SELL",off))
+                if r['Buy PE']: legs.append(("PE","BUY",off))
+                if r['Sell PE']: legs.append(("PE","SELL",off))
+
+# ==========================================
+# 7. EXECUTION & ADJUSTMENT LOGS
+# ==========================================
+if start:
+    if not legs:
+        st.warning("⚠️ Kripya Option Chain mein se kam se kam ek leg (Buy/Sell) par tick karein ya koi Pre-defined Strategy select karein!")
+    else:
+        st.success("✅ Algo / Backtest Simulation Started Successfully!")
+        ld = []
+        for t, sd, off in legs:
+            tk, sm, ex = get_token(sym_name, tgt_stk+off, t, tgt_exp)
+            if tk: ld.append({"t":t, "s":sd, "k":tgt_stk+off, "tk":tk, "sm":sm, "a":True, "ex":ex})
+        
+        if ld:
+            for l in ld:
+                iv_val = (sim_iv/100.0) if "Backtest" in mode else 0.15
+                l['e'] = bs_price(tgt_stk, l['k'], dte, "CE" if l['t']=="CE" else ("PE" if l['t']=="PE" else tgt_stk), v=iv_val) if "Backtest" in mode else safe_ltp(l['ex'], l['sm'], l['tk'])
+                l['sl'] = l['e']*(1-sl_p/100) if l['s']=="BUY" else l['e']*(1+sl_p/100)
+                l['tg'] = l['e']*(1+tgt_p/100) if l['s']=="BUY" else l['e']*(1-tgt_p/100)
+                
+            adj_logs = []
+            with st.expander("⚡ Live MTM, Adjustments & Adjustment Log", expanded=True):
+                cs = st.columns(len(ld))
+                lms = [cs[i].empty() for i in range(len(ld))]
+                g1, g2, g3, g4 = st.columns(4)
+                pm, dm, tm, vm, msg = g1.empty(), g2.empty(), g3.empty(), g4.empty(), st.empty()
+                mpnl = 0
+                for step in range(5):
+                    pnl, td, tt, tv = 0, 0, 0, 0
+                    for i, l in enumerate(ld):
+                        if not l['a']: lms[i].metric(f"🔴 {l['s']} {l['k']} {l['t']}", "Closed"); continue
+                        iv_val = (sim_iv/100.0) if "Backtest" in mode else 0.15
+                        l['l'] = bs_price(eff_spot, l['k'], dte, "CE" if l['t']=="CE" else ("PE" if l['t']=="PE" else tgt_stk), v=iv_val) if "Backtest" in mode else safe_ltp(l['ex'], l['sm'], l['tk'])
+                        pnl += calc_pnl(l['l'], l['k'], l['e'], l['t'], l['s'], 0)*lot_size
+                        d, t, v = bs_greeks(tgt_stk, l['k'], dte, "CE" if l['t']=="CE" else "PE")
+                        if l['s']=="SELL": d, t, v = -d, -t, -v
+                        td+=d; tt+=t; tv+=v
+                        lms[i].metric(f"🟢 {l['s']} {l['k']} {l['t']}", f"₹ {l['l']:.2f}")
+                        lms[i].caption(f"Traded: {l['sm']}")
+                    
+                    pm.metric("Total MTM P&L", f"₹ {pnl:.2f}")
+                    dm.metric("Total Delta", f"{td:.2f}")
+                    tm.metric("Total Theta", f"₹ {tt*lot_size:.2f}/day")
+                    vm.metric("Total Vega", f"{tv:.2f}")
+                    
+                    if "Naked Sell" in strat and len(ld)>=2:
+                        ce, pe_l = ld[0], ld[1]
+                        if ce['a'] and ce['l']>=ce['sl']:
+                            ce['a'] = False
+                            adj_logs.append({"Time": time.strftime("%H:%M:%S"), "Action": "CE SL Hit - Adjusted", "Details": f"Closed {ce['sm']}, Rolled to OTM"})
+                            n_stk = tgt_stk + (10*stk_step)
+                            n_tk, n_sm, n_ex = get_token(sym_name, n_stk, "PE", tgt_exp)
+                            if n_tk:
+                                ld.append({"t": "PE", "s": "SELL", "k": n_stk, "tk": n_tk, "sm": n_sm, "a": True, "ex": n_ex, "e": 50.0, "sl": 75.0, "tg": 5.0})
+                        if pe_l['a'] and pe_l['l']>=pe_l['sl']:
+                            pe_l['a'] = False
+                            adj_logs.append({"Time": time.strftime("%H:%M:%S"), "Action": "PE SL Hit - Adjusted", "Details": f"Closed {pe_l['sm']}, Rolled to OTM"})
+    
+                            n_stk = tgt_stk - (10*stk_step)
+                            n_tk, n_sm, n_ex = get_token(sym_name, n_stk, "CE", tgt_exp)
+                            if n_tk:
+                                ld.append({"t": "CE", "s": "SELL", "k": n_stk, "tk": n_tk, "sm": n_sm, "a": True, "ex": n_ex, "e": 50.0, "sl": 75.0, "tg": 5.0})
+                    
+                    if adj_logs:
+                        st.markdown("### 📝 Adjustment Audit Trail")
+                        st.dataframe(pd.DataFrame(adj_logs), use_container_width=True)
+                    
+                    time.sleep(1)
