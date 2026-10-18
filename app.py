@@ -33,7 +33,6 @@ def_idx = unique_syms.index("NIFTY") if "NIFTY" in unique_syms else 0
 # ==========================================
 # 2. HELPER FUNCTIONS
 # ==========================================
-# 👇 BUG FIXED: Safe Date Parser to prevent Streamlit Crashes 👇
 def parse_exp(d):
     try: return pd.to_datetime(str(d))
     except: return pd.Timestamp.max
@@ -51,6 +50,7 @@ def place_order(sym, tok, qty, side):
     except Exception as e: return str(e)
 
 def bs_greeks(S, K, T, typ="CE", r=0.10, v=0.15):
+    if S <= 0 or K <= 0: return 0.0, 0.0, 0.0  # 👇 SAFETY NET TO PREVENT CRASH
     T = max(T/365.0, 0.001)
     d1 = (math.log(S/K)+(r+0.5*v**2)*T)/(v*math.sqrt(T)); d2 = d1-v*math.sqrt(T)
     cdf = lambda x: (1.0+math.erf(x/math.sqrt(2.0)))/2.0
@@ -59,6 +59,7 @@ def bs_greeks(S, K, T, typ="CE", r=0.10, v=0.15):
     return cdf(d1)-1, -(S*pdf(d1)*v)/(2*math.sqrt(T))+r*K*math.exp(-r*T)*cdf(-d2), (S*pdf(d1)*math.sqrt(T))/100
 
 def bs_price(S, K, T, typ="CE", r=0.10, v=0.15):
+    if S <= 0 or K <= 0: return 0.0  # 👇 SAFETY NET TO PREVENT CRASH
     if T<=0: return max(0, S-K) if typ=="CE" else max(0, K-S)
     T = max(T/365.0, 0.001)
     d1 = (math.log(S/K)+(r+0.5*v**2)*T)/(v*math.sqrt(T)); d2 = d1-v*math.sqrt(T)
@@ -85,12 +86,10 @@ st.sidebar.header("⚙️ Algo Settings")
 strat = st.sidebar.selectbox("📈 Select Strategy", ["Option Chain Builder ⛓️", "Custom Strategy Builder 🛠️", "Short Straddle (Naked Sell ⚠️)", "Iron Butterfly (Hedged Straddle 🛡️)", "Bullish Hedge (Long FUT + Buy PE)", "Bearish Hedge (Short FUT + Buy CE)"])
 sym_name = st.sidebar.selectbox("🔍 Search F&O Symbol (Type to Search)", options=unique_syms, index=def_idx).upper()
 
-# SMART ASSET SYNC
 sym_df = fno_df[fno_df['name']==sym_name]
 if not sym_df.empty:
     opt_df = sym_df[sym_df['symbol'].str.endswith('CE') | sym_df['symbol'].str.endswith('PE')]
     if not opt_df.empty:
-        # 👇 Used parse_exp to prevent crashes 👇
         exps = sorted(opt_df['expiry'].dropna().unique(), key=parse_exp)
         near_df = opt_df[opt_df['expiry']==exps[0]]
         c_lot = int(near_df.iloc[0]['lotsize'])
@@ -99,7 +98,6 @@ if not sym_df.empty:
         c_step = int(stks[1]-stks[0]) if len(stks)>1 else 50
         c_stk = int(stks[len(stks)//2])
     else:
-        # 👇 Used parse_exp here too 👇
         exps = sorted(sym_df['expiry'].dropna().unique(), key=parse_exp)
         c_lot, c_step, c_stk = int(sym_df.iloc[0]['lotsize']), 50, 25000
 else: exps, c_lot, c_step, c_stk = ["29DEC2026"], 25, 50, 25000
@@ -125,7 +123,6 @@ st.sidebar.subheader("🎯 Leg-Wise Settings")
 sl_p = st.sidebar.number_input("Individual Leg SL (%)", 10, 200, 50, step=10)
 tgt_p = st.sidebar.number_input("Individual Leg Target (%)", 10, 100, 90, step=10)
 start = st.sidebar.button("▶️ START LIVE ALGO")
-
 # ==========================================
 # 4. MAIN DASHBOARD LOGIC
 # ==========================================
@@ -137,6 +134,7 @@ if "Option Chain" in strat:
         st.caption("☑️ Checkboxes par tick karein aur Strategy banayein (Greeks & OI ke sath!)")
         ch_data = []
         for s in range(int(tgt_stk - 10*stk_step), int(tgt_stk + 11*stk_step), int(stk_step)):
+            if s <= 0: continue # 👇 BUG FIXED: Prevents negative strikes from crashing the app
             cd, ct, cv = bs_greeks(tgt_stk, s, dte, "CE")
             pd_d, pt, pv = bs_greeks(tgt_stk, s, dte, "PE")
             cp, pp = round(bs_price(tgt_stk, s, dte, "CE"),2), round(bs_price(tgt_stk, s, dte, "PE"),2)
@@ -153,17 +151,17 @@ if "Option Chain" in strat:
                 else: res.append('')
             return res
 
-        ed_ch = st.data_editor(df_ch.style.apply(style_ch, axis=1), hide_index=True, use_container_width=True, column_config={"Spot": st.column_config.TextColumn("📍 Spot", width="small"), "STRIKE": st.column_config.NumberColumn("🎯 STRIKE", required=True), "Buy CE": st.column_config.CheckboxColumn("🟢 Buy CE"), "Sell CE": st.column_config.CheckboxColumn("🔴 Sell CE"), "CE Price": st.column_config.NumberColumn("₹ CE Price", format="%.2f"), "CE Trend": st.column_config.TextColumn("📈 CE Trend"), "CE OI": st.column_config.ProgressColumn("📊 CE OI Bar", format="%d", min_value=0, max_value=100000), "PE OI": st.column_config.ProgressColumn("📊 PE OI Bar", format="%d", min_value=0, max_value=100000), "PE Trend": st.column_config.TextColumn("📉 PE Trend"), "PE Price": st.column_config.NumberColumn("₹ PE Price", format="%.2f"), "Buy PE": st.column_config.CheckboxColumn("🟢 Buy PE"), "Sell PE": st.column_config.CheckboxColumn("🔴 Sell PE")})
-        
-        hs, hb = False, False
-        for _, r in ed_ch.iterrows():
-            off = int(r['STRIKE']) - tgt_stk
-            if r['Buy CE']: legs.append(("CE","BUY",off)); hb=True; est_mgn+=10000
-            if r['Sell CE']: legs.append(("CE","SELL",off)); hs=True; est_mgn+=110000
-            if r['Buy PE']: legs.append(("PE","BUY",off)); hb=True; est_mgn+=10000
-            if r['Sell PE']: legs.append(("PE","SELL",off)); hs=True; est_mgn+=110000
-        if hs and hb and len(legs)>1: est_mgn*=0.35
-        elif len(legs)>1: est_mgn*=0.85
+        if not df_ch.empty:
+            ed_ch = st.data_editor(df_ch.style.apply(style_ch, axis=1), hide_index=True, use_container_width=True, column_config={"Spot": st.column_config.TextColumn("📍 Spot", width="small"), "STRIKE": st.column_config.NumberColumn("🎯 STRIKE", required=True), "Buy CE": st.column_config.CheckboxColumn("🟢 Buy CE"), "Sell CE": st.column_config.CheckboxColumn("🔴 Sell CE"), "CE Price": st.column_config.NumberColumn("₹ CE Price", format="%.2f"), "CE Trend": st.column_config.TextColumn("📈 CE Trend"), "CE OI": st.column_config.ProgressColumn("📊 CE OI Bar", format="%d", min_value=0, max_value=100000), "PE OI": st.column_config.ProgressColumn("📊 PE OI Bar", format="%d", min_value=0, max_value=100000), "PE Trend": st.column_config.TextColumn("📉 PE Trend"), "PE Price": st.column_config.NumberColumn("₹ PE Price", format="%.2f"), "Buy PE": st.column_config.CheckboxColumn("🟢 Buy PE"), "Sell PE": st.column_config.CheckboxColumn("🔴 Sell PE")})
+            hs, hb = False, False
+            for _, r in ed_ch.iterrows():
+                off = int(r['STRIKE']) - tgt_stk
+                if r['Buy CE']: legs.append(("CE","BUY",off)); hb=True; est_mgn+=10000
+                if r['Sell CE']: legs.append(("CE","SELL",off)); hs=True; est_mgn+=110000
+                if r['Buy PE']: legs.append(("PE","BUY",off)); hb=True; est_mgn+=10000
+                if r['Sell PE']: legs.append(("PE","SELL",off)); hs=True; est_mgn+=110000
+            if hs and hb and len(legs)>1: est_mgn*=0.35
+            elif len(legs)>1: est_mgn*=0.85
 elif "Custom" in strat:
     st.sidebar.markdown("### 🛠️ Build Your Own Strategy")
     nl = st.sidebar.number_input("Kitne Legs chahiye?", 1, 6, 2)
