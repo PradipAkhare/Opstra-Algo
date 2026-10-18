@@ -170,8 +170,9 @@ est_margin = 0
 legs_config = []
 
 if "Option Chain" in strategy:
-    # 👇 Naya Expander add kiya hai jisse Show/Hide kar sakte hain 👇
     with st.expander("⛓️ Advanced Option Chain (Click to Show/Hide)", expanded=True):
+        # 👇 Explicit Market Position Info 👇
+        st.markdown(f"#### 📍 Market is currently at: **{target_strike} (ATM)**")
         st.caption("☑️ Checkboxes par tick karein aur Strategy banayein (Greeks & OI ke sath!)")
         
         # Building Option Chain Data
@@ -186,15 +187,14 @@ if "Option Chain" in strategy:
             ce_oi = int(100000 * math.exp(-(dist**2)/100000))
             pe_oi = int(100000 * math.exp(-(dist**2)/100000))
             
-            # 👇 SMART BUILD-UP TREND LOGIC 👇
             if strike > target_strike:
-                ce_trend = "🔴 Short Buildup" # OTM Calls are usually written
-                pe_trend = "🟢 Long Buildup"  # ITM Puts
+                ce_trend = "🔴 Short Buildup" 
+                pe_trend = "🟢 Long Buildup"  
             elif strike < target_strike:
-                ce_trend = "🚀 Short Covering" # ITM Calls
-                pe_trend = "🔴 Short Buildup"  # OTM Puts are usually written
+                ce_trend = "🚀 Short Covering" 
+                pe_trend = "🔴 Short Buildup"  
             else:
-                ce_trend = "🔴 Short Buildup" # ATM Straddle Selling
+                ce_trend = "🔴 Short Buildup" 
                 pe_trend = "🔴 Short Buildup"
                 
             chain_data.append({
@@ -202,6 +202,7 @@ if "Option Chain" in strategy:
                 "CE Trend": ce_trend,
                 "CE OI": ce_oi, 
                 "CE Theta": ce_t, "CE Delta": ce_d, 
+                "Spot": "🎯 ATM" if strike == target_strike else "", # 👇 NEW SPOT MARKER 👇
                 "STRIKE": strike, 
                 "PE Delta": pe_d, "PE Theta": pe_t, 
                 "PE OI": pe_oi,
@@ -211,12 +212,12 @@ if "Option Chain" in strategy:
             
         df_chain = pd.DataFrame(chain_data)
         
-        # 👇 CONDITIONAL FORMATTING (PROGRESS BARS & TEXT) 👇
         edited_chain = st.data_editor(
             df_chain, 
             hide_index=True, 
             use_container_width=True,
             column_config={
+                "Spot": st.column_config.TextColumn("📍 Spot", width="small"), # 👇 COLUMN CONFIG 👇
                 "STRIKE": st.column_config.NumberColumn("🎯 STRIKE", help="Center Strike", required=True),
                 "Buy CE": st.column_config.CheckboxColumn("🟢 Buy CE"),
                 "Sell CE": st.column_config.CheckboxColumn("🔴 Sell CE"),
@@ -453,57 +454,4 @@ if len(legs_config) > 0:
                                         pe_leg["token"] = new_token
                                         pe_leg["strike"] = new_strike
                                         pe_leg["live"] = smartApi.ltpData("NFO", new_symbol, new_token)['data']['ltp']
-                                        pe_leg["sl"], pe_leg["tgt"] = get_exit_prices(pe_leg["live"], "SELL", leg_sl_percent, leg_target_percent)
-                                elif ce_leg["live"] <= ce_leg["tgt"]:
-                                    place_order_api(ce_leg["symbol"], ce_leg["token"], lot_size, "BUY")
-                                    ce_leg["active"] = False 
-
-                            if pe_leg["active"]:
-                                if pe_leg["live"] >= pe_leg["sl"]:
-                                    st.toast(f"⚠️ PE Stop Loss Hit! Adjusting...")
-                                    place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
-                                    pe_leg["active"] = False 
-                                    if ce_leg["active"]:
-                                        place_order_api(ce_leg["symbol"], ce_leg["token"], lot_size, "BUY")
-                                        ce_leg["active"] = False
-                                    
-                                    new_strike = target_strike - 500 
-                                    new_token, new_symbol = get_token_info("NIFTY", new_strike, "CE", target_expiry)
-                                    if new_token:
-                                        place_order_api(new_symbol, new_token, lot_size, "SELL")
-                                        ce_leg["active"] = True
-                                        ce_leg["symbol"] = new_symbol
-                                        ce_leg["token"] = new_token
-                                        ce_leg["strike"] = new_strike
-                                        ce_leg["live"] = smartApi.ltpData("NFO", new_symbol, new_token)['data']['ltp']
-                                        ce_leg["sl"], ce_leg["tgt"] = get_exit_prices(ce_leg["live"], "SELL", leg_sl_percent, leg_target_percent)
-                                elif pe_leg["live"] <= pe_leg["tgt"]:
-                                    place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
-                                    pe_leg["active"] = False 
-                        else:
-                            all_closed = True
-                            for leg in leg_data:
-                                if leg["active"]:
-                                    all_closed = False
-                                    hit_sl, hit_tgt = check_exit(leg["live"], leg["side"], leg["sl"], leg["tgt"])
-                                    if hit_sl or hit_tgt:
-                                        st.toast(f"🔔 {leg['strike']} {leg['type']} Hit Target/SL!")
-                                        place_order_api(leg["symbol"], leg["token"], lot_size, "SELL" if leg["side"]=="BUY" else "BUY")
-                                        leg["active"] = False
-                            if all_closed:
-                                status_msg.error("🛑 All legs squared off. Algo stopped.")
-                                break
-                            
-                        if pnl <= max_loss:
-                            status_msg.error(f"⚠️ TOTAL MAX LOSS HIT! (-₹{abs(round(pnl,2))}) Squaring off all...")
-                            for leg in leg_data:
-                                if leg["active"]: place_order_api(leg["symbol"], leg["token"], lot_size, "SELL" if leg["side"]=="BUY" else "BUY")
-                            break
-                            
-                        time.sleep(1)
-                        
-    else:
-        st.warning("⚠️ Koi ek Token nahi mila. Kripya Expiry Date check karein (Jaise: 29DEC2026) ya Strike badlein.")
-else:
-    if "Option Chain" in strategy:
-        st.info("👆 Option Chain mein se koi leg select karein (Buy/Sell check box pe tick mark karein) taaki Payoff Graph dikh sake!")
+                                        pe_leg["sl"], pe_leg["tgt"] = get_exit_prices(pe_
