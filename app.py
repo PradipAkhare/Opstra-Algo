@@ -125,33 +125,17 @@ def bs_price(S, K, T_days, opt_type="CE", r=0.10, v=0.15):
     def cdf(x): return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
     if opt_type == "CE": return S * cdf(d1) - K * math.exp(-r * T) * cdf(d2)
     else: return K * math.exp(-r * T) * cdf(-d2) - S * cdf(-d1)
-def bs_price(S, K, T_days, opt_type="CE", r=0.10, v=0.15):
-    if T_days <= 0:
-        return max(0, S - K) if opt_type == "CE" else max(0, K - S)
-    T = T_days / 365.0
-    d1 = (math.log(S / K) + (r + 0.5 * v**2) * T) / (v * math.sqrt(T))
-    d2 = d1 - v * math.sqrt(T)
-    def cdf(x): return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
-    if opt_type == "CE": return S * cdf(d1) - K * math.exp(-r * T) * cdf(d2)
-    else: return K * math.exp(-r * T) * cdf(-d2) - S * cdf(-d1)
 
-# 👇 ESTIMATED MARGIN CALCULATOR 👇
 def estimate_margin(lot_size):
-    # Nifty ke 1 Lot (25 qty) Short Straddle mein lagbhag ₹1,30,000 lagte hain
     return (lot_size / 25) * 130000
 
-# 👇 PROBABILITY OF PROFIT (POP) CALCULATOR 👇
 def calculate_pop(S, premium, T_days, r=0.10, v=0.15):
     T = max(T_days / 365.0, 0.001)
-    LBE = S - premium  # Lower Break-Even
-    UBE = S + premium  # Upper Break-Even
-    
+    LBE = S - premium 
+    UBE = S + premium 
     d2_upper = (math.log(S / UBE) + (r - 0.5 * v**2) * T) / (v * math.sqrt(T))
     d2_lower = (math.log(S / LBE) + (r - 0.5 * v**2) * T) / (v * math.sqrt(T))
-    
     def cdf(x): return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
-    
-    # Probability of Nifty staying between Lower and Upper Break-Even
     pop = cdf(d2_lower) - cdf(d2_upper)
     return round(pop * 100, 2)
 
@@ -185,9 +169,6 @@ if start_algo:
     pe_token, pe_symbol = get_token_info("NIFTY", target_strike, "PE", target_expiry)
     
     if ce_token and pe_token:
-        # Initial Prices
-      if ce_token and pe_token:
-        # Initial Prices
         ce_data = smartApi.ltpData("NFO", ce_symbol, ce_token)
         pe_data = smartApi.ltpData("NFO", pe_symbol, pe_token)
         
@@ -207,6 +188,23 @@ if start_algo:
         m_col2.metric("Total Premium Collected", f"₹ {round(entry_prem, 2)}")
         m_col3.metric("Max Profit (At Expiry)", f"₹ {round(max_profit, 2)}")
         m_col4.metric("Probability of Profit (POP)", f"{pop_value} %")
+        
+        # --- INTERACTIVE GRAPH DRAW KARNA (PLOTLY) ---
+        st.subheader("📉 Expiry & T+0 Payoff Graph")
+        prices = list(range(int(target_strike) - 2500, int(target_strike) + 2500, 10))
+        pnl_expiry = []
+        pnl_t0 = []
+        
+        for p in prices:
+            ce_exp = entry_ce - max(0, p - target_strike)
+            pe_exp = entry_pe - max(0, target_strike - p)
+            pnl_expiry.append((ce_exp + pe_exp) * lot_size)
+            
+            ce_t0_price = bs_price(p, target_strike, days_to_expiry, "CE")
+            pe_t0_price = bs_price(p, target_strike, days_to_expiry, "PE")
+            ce_t0_pnl = entry_ce - ce_t0_price
+            pe_t0_pnl = entry_pe - pe_t0_price
+            pnl_t0.append((ce_t0_pnl + pe_t0_pnl) * lot_size)
             
         fig = go.Figure()
         
@@ -280,4 +278,47 @@ if start_algo:
             theta_metric.metric(label="Total Theta (Time Decay)", value=f"₹ {round(total_theta * lot_size, 2)} / day")
             vega_metric.metric(label="Total Vega (Vol Impact)", value=round(total_vega, 2))
             
-            # 👇 SMART TRAILING STOP LOSS (TS
+            # 👇 SMART TRAILING STOP LOSS (TSL) 👇
+            if pnl > max_pnl_seen:
+                max_pnl_seen = pnl
+                
+            if max_pnl_seen >= tsl_activation:
+                dynamic_sl = max_pnl_seen - tsl_trail_by
+                if pnl <= dynamic_sl:
+                    status_msg.error(f"🛡️ TRAILING SL HIT! Protected Profit at ₹{round(pnl, 2)}. Squaring off...")
+                    if ce_active: place_exit_order(ce_symbol, ce_token, lot_size)
+                    if pe_active: place_exit_order(pe_symbol, pe_token, lot_size)
+                    break
+
+            # 👇 SMART ROLLING ADJUSTMENT 👇
+            if ce_active:
+                if live_ce >= ce_sl_price:
+                    st.toast(f"⚠️ CE Stop Loss Hit at ₹{live_ce}! Adjusting Position...")
+                    place_exit_order(ce_symbol, ce_token, lot_size)
+                    ce_active = False 
+                    
+                    if pe_active:
+                        place_exit_order(pe_symbol, pe_token, lot_size)
+                        pe_active = False
+                        st.toast(f"🔄 PE also booked to roll up!")
+                    
+                    new_strike = target_strike + 500
+                    new_pe_token, new_pe_symbol = get_token_info("NIFTY", new_strike, "PE", target_expiry)
+                    
+                    if new_pe_token:
+                        place_new_sell_order(new_pe_symbol, new_pe_token, lot_size)
+                        st.toast(f"✅ Rolled Up: Sold Naya Put {new_strike} PE!")
+                        pe_active = True
+                        pe_symbol = new_pe_symbol
+                        pe_token = new_pe_token
+                        live_new_pe = smartApi.ltpData("NFO", pe_symbol, pe_token)['data']['ltp']
+                        pe_sl_price = live_new_pe * (1 + (leg_sl_percent / 100))
+                        pe_target_price = live_new_pe * (1 - (leg_target_percent / 100))
+                        
+                elif live_ce <= ce_target_price:
+                    st.toast(f"🎯 CE Target Hit (90% Profit)! Exiting CE...")
+                    place_exit_order(ce_symbol, ce_token, lot_size)
+                    ce_active = False 
+
+            if pe_active:
+                if live_pe >= pe_
