@@ -14,7 +14,7 @@ import random
 # 1. PAGE SETUP
 # ==========================================
 st.set_page_config(page_title="Opstra Clone", layout="wide")
-st.title("🚀 Opstra Clone: Pro Strategy Dashboard")
+st.title("🚀 Opstra Clone: Universal Pro Dashboard")
 
 # ==========================================
 # 2. LOGIN DETAILS
@@ -54,10 +54,15 @@ df = get_instrument_df()
 # 3. ADVANCED HELPER FUNCTIONS (MULTI-LEG)
 # ==========================================
 def get_token_info(symbol, strike_price, inst_type, expiry):
+    filtered_df = df[((df['exch_seg'] == 'NFO') | (df['exch_seg'] == 'MCX')) & 
+                     (df['name'] == symbol) & 
+                     (df['expiry'] == expiry)]
+    
     if inst_type == "FUT":
-        filtered_df = df[(df['exch_seg'] == 'NFO') & (df['name'] == symbol) & (df['symbol'].str.endswith('FUT')) & (df['expiry'] == expiry)]
+        filtered_df = filtered_df[filtered_df['symbol'].str.endswith('FUT')]
     else:
-        filtered_df = df[(df['exch_seg'] == 'NFO') & (df['name'] == symbol) & (df['strike'] == str(strike_price * 100) + '.000000') & (df['symbol'].str.endswith(inst_type)) & (df['expiry'] == expiry)]
+        filtered_df = filtered_df[(filtered_df['strike'] == str(float(strike_price) * 100)) & 
+                                  (filtered_df['symbol'].str.endswith(inst_type))]
     
     if not filtered_df.empty:
         return filtered_df.iloc[0]['token'], filtered_df.iloc[0]['symbol']
@@ -145,7 +150,10 @@ strategy = st.sidebar.selectbox("📈 Select Strategy", [
     "Bearish Hedge (Short FUT + Buy CE)"
 ])
 
+st.sidebar.markdown("### 🔍 Asset Settings")
+symbol_name = st.sidebar.text_input("F&O Symbol (e.g., NIFTY, BANKNIFTY, RELIANCE, CRUDEOIL)", value="NIFTY").upper()
 target_strike = st.sidebar.number_input("Center Strike (ATM)", value=25000, step=50)
+strike_step = st.sidebar.number_input("Strike Step (Difference)", value=50, help="Nifty: 50, BankNifty: 100, Reliance: 20")
 target_expiry = st.sidebar.text_input("Expiry Date", value="29DEC2026")
 lot_size = st.sidebar.number_input("Lot Size", value=25)
 days_to_expiry = st.sidebar.number_input("Days to Expiry", value=3)
@@ -170,19 +178,15 @@ est_margin = 0
 legs_config = []
 
 if "Option Chain" in strategy:
-    with st.expander("⛓️ Advanced Option Chain (Click to Show/Hide)", expanded=True):
-        # 👇 Explicit Market Position Info 👇
-        st.markdown(f"#### 📍 Market is currently at: **{target_strike} (ATM)**")
+    with st.expander(f"⛓️ {symbol_name} Option Chain (Click to Show/Hide)", expanded=True):
+        st.markdown(f"#### 📍 {symbol_name} is currently at: **{target_strike} (ATM)**")
         st.caption("☑️ Checkboxes par tick karein aur Strategy banayein (Greeks & OI ke sath!)")
         
-        # Building Option Chain Data
         chain_data = []
-        for strike in range(int(target_strike) - 500, int(target_strike) + 550, 50):
-            # Calculate Greeks
+        for strike in range(int(target_strike) - (10 * int(strike_step)), int(target_strike) + (11 * int(strike_step)), int(strike_step)):
             ce_d, ce_t, ce_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "CE")
             pe_d, pe_t, pe_v = black_scholes_greeks(target_strike, strike, days_to_expiry, "PE")
             
-            # Simulate OI (Highest at ATM)
             dist = abs(strike - target_strike)
             ce_oi = int(100000 * math.exp(-(dist**2)/100000))
             pe_oi = int(100000 * math.exp(-(dist**2)/100000))
@@ -202,7 +206,7 @@ if "Option Chain" in strategy:
                 "CE Trend": ce_trend,
                 "CE OI": ce_oi, 
                 "CE Theta": ce_t, "CE Delta": ce_d, 
-                "Spot": "🎯 ATM" if strike == target_strike else "", # 👇 NEW SPOT MARKER 👇
+                "Spot": "🎯 ATM" if strike == target_strike else "",
                 "STRIKE": strike, 
                 "PE Delta": pe_d, "PE Theta": pe_t, 
                 "PE OI": pe_oi,
@@ -212,12 +216,22 @@ if "Option Chain" in strategy:
             
         df_chain = pd.DataFrame(chain_data)
         
+        # 👇 HIGHLIGHT FUNCTION FOR ATM ROW 👇
+        def color_atm_row(row):
+            if row['Spot'] == '🎯 ATM':
+                # Golden/Blue Highlight Color for the whole row
+                return ['background-color: rgba(255, 215, 0, 0.15); font-weight: bold; border-top: 1px solid #FFD700; border-bottom: 1px solid #FFD700;'] * len(row)
+            return [''] * len(row)
+
+        # Apply the style to DataFrame
+        styled_chain = df_chain.style.apply(color_atm_row, axis=1)
+        
         edited_chain = st.data_editor(
-            df_chain, 
+            styled_chain, 
             hide_index=True, 
             use_container_width=True,
             column_config={
-                "Spot": st.column_config.TextColumn("📍 Spot", width="small"), # 👇 COLUMN CONFIG 👇
+                "Spot": st.column_config.TextColumn("📍 Spot", width="small"), 
                 "STRIKE": st.column_config.NumberColumn("🎯 STRIKE", help="Center Strike", required=True),
                 "Buy CE": st.column_config.CheckboxColumn("🟢 Buy CE"),
                 "Sell CE": st.column_config.CheckboxColumn("🔴 Sell CE"),
@@ -266,7 +280,7 @@ elif "Custom" in strategy:
         c1, c2, c3 = st.sidebar.columns([1.2, 1.2, 1.5])
         l_type = c1.selectbox("Type", ["CE", "PE", "FUT"], key=f"t_{i}")
         l_side = c2.selectbox("Side", ["BUY", "SELL"], key=f"s_{i}")
-        l_strike = c3.number_input("Strike", value=target_strike, step=50, key=f"stk_{i}")
+        l_strike = c3.number_input("Strike", value=target_strike, step=strike_step, key=f"stk_{i}")
         
         l_off = l_strike - target_strike
         legs_config.append((l_type, l_side, l_off))
@@ -287,7 +301,7 @@ elif "Custom" in strategy:
         est_margin = est_margin * 0.85
 
 elif "Butterfly" in strategy:
-    hedge_dist = st.sidebar.number_input("Hedge OTM Distance (Buy Options)", value=500, step=50)
+    hedge_dist = st.sidebar.number_input("Hedge OTM Distance (Buy Options)", value=10*strike_step, step=int(strike_step))
     legs_config = [("CE", "SELL", 0), ("PE", "SELL", 0), ("CE", "BUY", hedge_dist), ("PE", "BUY", -hedge_dist)]
     est_margin = 55000 
 elif "Straddle" in strategy:
@@ -312,7 +326,7 @@ all_tokens_found = True
 if len(legs_config) > 0:
     for l_type, l_side, l_off in legs_config:
         l_strike = target_strike + l_off
-        tok, sym = get_token_info("NIFTY", l_strike, l_type, target_expiry)
+        tok, sym = get_token_info(symbol_name, l_strike, l_type, target_expiry)
         if tok:
             leg_data.append({"type": l_type, "side": l_side, "strike": l_strike, "token": tok, "symbol": sym, "active": True})
         else:
@@ -326,7 +340,12 @@ if len(legs_config) > 0:
             leg["sl"], leg["tgt"] = get_exit_prices(leg["entry"], leg["side"], leg_sl_percent, leg_target_percent)
             
         current_spot = target_strike 
-        prices = list(range(int(target_strike) - 4000, int(target_strike) + 4000, 10))
+        
+        min_p = int(target_strike * 0.85)
+        max_p = int(target_strike * 1.15)
+        step_p = max(1, int((max_p - min_p) / 200)) 
+        prices = list(range(min_p, max_p, step_p))
+        
         pnl_expiry = []
         pnl_t0 = []
         
@@ -341,17 +360,16 @@ if len(legs_config) > 0:
             
         st.markdown("---")
         
-        # 👇 NAYA EXPANDER GRAPH AUR METRICS KE LIYE 👇
         with st.expander("📊 Pre-Trade Analysis & Payoff Graph (Click to Show/Hide)", expanded=True):
             if len(leg_data) > 0:
-                max_p = max(pnl_expiry)
-                max_l = min(pnl_expiry)
+                max_profit_val = max(pnl_expiry)
+                max_loss_val = min(pnl_expiry)
                 
                 right_diff = pnl_expiry[-1] - pnl_expiry[-2]
                 left_diff = pnl_expiry[0] - pnl_expiry[1]
                 
-                max_profit_str = "Unlimited 🚀" if (right_diff > 1 or left_diff > 1) else f"₹ {round(max_p, 2)}"
-                max_loss_str = "Unlimited ⚠️" if (right_diff < -1 or left_diff < -1) else f"₹ {round(max_l, 2)}"
+                max_profit_str = "Unlimited 🚀" if (right_diff > 1 or left_diff > 1) else f"₹ {round(max_profit_val, 2)}"
+                max_loss_str = "Unlimited ⚠️" if (right_diff < -1 or left_diff < -1) else f"₹ {round(max_loss_val, 2)}"
                 
                 pop_value = calculate_dynamic_pop(prices, pnl_t0, current_spot, days_to_expiry)
             else:
@@ -373,7 +391,7 @@ if len(legs_config) > 0:
             fig.add_trace(go.Scatter(x=prices, y=pnl_loss, mode='none', fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.3)', showlegend=False))
             fig.add_trace(go.Scatter(x=prices, y=pnl_expiry, mode='lines', name='Expiry Payoff', line=dict(color='blue', dash='dash')))
             fig.add_trace(go.Scatter(x=prices, y=pnl_t0, mode='lines', name='T+0 Payoff (Today)', line=dict(color='darkorange', width=3)))
-            fig.update_layout(hovermode="x unified", xaxis_title="Nifty Price", yaxis_title="P&L (₹)", title="Payoff Graph")
+            fig.update_layout(hovermode="x unified", xaxis_title=f"{symbol_name} Price", yaxis_title="P&L (₹)", title="Payoff Graph")
             fig.add_vline(x=target_strike, line_dash="dot", line_color="red", annotation_text="Strike")
             fig.add_hline(y=0, line_color="black")
             st.plotly_chart(fig, use_container_width=True)
@@ -386,7 +404,6 @@ if len(legs_config) > 0:
                 st.success("✅ Algo Started & Orders Placed Successfully!")
                 st.markdown("---")
                 
-                # 👇 NAYA EXPANDER LIVE ALGO TRACKER KE LIYE 👇
                 with st.expander("⚡ Live MTM & Strategy Tracker (Click to Show/Hide)", expanded=True):
                     cols = st.columns(len(leg_data))
                     leg_metrics = [cols[i].empty() for i in range(len(leg_data))]
@@ -445,8 +462,8 @@ if len(legs_config) > 0:
                                         place_order_api(pe_leg["symbol"], pe_leg["token"], lot_size, "BUY")
                                         pe_leg["active"] = False
                                     
-                                    new_strike = target_strike + 500
-                                    new_token, new_symbol = get_token_info("NIFTY", new_strike, "PE", target_expiry)
+                                    new_strike = target_strike + (10 * int(strike_step))
+                                    new_token, new_symbol = get_token_info(symbol_name, new_strike, "PE", target_expiry)
                                     if new_token:
                                         place_order_api(new_symbol, new_token, lot_size, "SELL")
                                         pe_leg["active"] = True
@@ -468,8 +485,8 @@ if len(legs_config) > 0:
                                         place_order_api(ce_leg["symbol"], ce_leg["token"], lot_size, "BUY")
                                         ce_leg["active"] = False
                                     
-                                    new_strike = target_strike - 500 
-                                    new_token, new_symbol = get_token_info("NIFTY", new_strike, "CE", target_expiry)
+                                    new_strike = target_strike - (10 * int(strike_step)) 
+                                    new_token, new_symbol = get_token_info(symbol_name, new_strike, "CE", target_expiry)
                                     if new_token:
                                         place_order_api(new_symbol, new_token, lot_size, "SELL")
                                         ce_leg["active"] = True
@@ -504,7 +521,7 @@ if len(legs_config) > 0:
                         time.sleep(1)
                         
     else:
-        st.warning("⚠️ Koi ek Token nahi mila. Kripya Expiry Date check karein (Jaise: 29DEC2026) ya Strike badlein.")
+        st.warning(f"⚠️ {symbol_name} ka Token nahi mila. Kripya Expiry Date check karein (Jaise: 29DEC2026) ya Strike badlein.")
 else:
     if "Option Chain" in strategy:
         st.info("👆 Option Chain mein se koi leg select karein (Buy/Sell check box pe tick mark karein) taaki Payoff Graph dikh sake!")
