@@ -167,14 +167,12 @@ symbol_name = st.sidebar.selectbox(
 symbol_df_base = fno_mcx_df[fno_mcx_df['name'] == symbol_name]
 
 if not symbol_df_base.empty:
-    # 1. Dynamic Expiry Generator
     unique_expiries = symbol_df_base['expiry'].unique().tolist()
     try:
         unique_expiries = sorted(unique_expiries, key=lambda x: pd.to_datetime(x))
     except:
         pass
     
-    # 2. Dynamic Lot Size & Strike Step
     symbol_df_ce = symbol_df_base[symbol_df_base['symbol'].str.endswith('CE')]
     if not symbol_df_ce.empty:
         calc_lot = int(symbol_df_ce.iloc[0]['lotsize'])
@@ -187,7 +185,6 @@ else:
     unique_expiries = ["29DEC2026"]
     calc_lot, calc_step, calc_strike = 25, 50, 25000
 
-# Popular Symbols Manual Override for better realistic Center Strike
 smart_strikes = {
     "NIFTY": 24000, "BANKNIFTY": 51000, "FINNIFTY": 23000, "MIDCPNIFTY": 13000,
     "CRUDEOIL": 6000, "NATURALGAS": 200, "GOLD": 75000, "SILVER": 90000,
@@ -198,7 +195,6 @@ if symbol_name in smart_strikes:
 
 target_strike = st.sidebar.number_input("Center Strike (ATM)", value=calc_strike, step=calc_step)
 strike_step = st.sidebar.number_input("Strike Step (Difference)", value=calc_step)
-# 👇 DYNAMIC EXPIRY DROPDOWN 👇
 target_expiry = st.sidebar.selectbox("Expiry Date", options=unique_expiries)
 lot_size = st.sidebar.number_input("Lot Size", value=calc_lot)
 days_to_expiry = st.sidebar.number_input("Days to Expiry", value=3)
@@ -261,12 +257,28 @@ if "Option Chain" in strategy:
             
         df_chain = pd.DataFrame(chain_data)
         
-        def color_atm_row(row):
-            if row['Spot'] == '🎯 ATM':
-                return ['background-color: rgba(255, 215, 0, 0.15); font-weight: bold; border-top: 1px solid #FFD700; border-bottom: 1px solid #FFD700;'] * len(row)
-            return [''] * len(row)
+        # 👇 SMART ITM / OTM / ATM CONDITIONAL FORMATTING 👇
+        def style_option_chain(row):
+            styles = []
+            current_strike = int(row['STRIKE'])
+            atm_strike = int(target_strike)
+            
+            for col in df_chain.columns:
+                if current_strike == atm_strike:
+                    # ATM Strike ko Golden color se highlight karega
+                    styles.append('background-color: rgba(255, 215, 0, 0.2); font-weight: bold; border-top: 1px solid #FFD700; border-bottom: 1px solid #FFD700;')
+                elif current_strike < atm_strike and 'CE' in col:
+                    # CE In-The-Money (ITM) -> Light Blue/Grey Tint
+                    styles.append('background-color: rgba(135, 206, 250, 0.08);')
+                elif current_strike > atm_strike and 'PE' in col:
+                    # PE In-The-Money (ITM) -> Light Blue/Grey Tint
+                    styles.append('background-color: rgba(135, 206, 250, 0.08);')
+                else:
+                    # Out-Of-The-Money (OTM) -> Normal background
+                    styles.append('')
+            return styles
 
-        styled_chain = df_chain.style.apply(color_atm_row, axis=1)
+        styled_chain = df_chain.style.apply(style_option_chain, axis=1)
         
         edited_chain = st.data_editor(
             styled_chain, 
