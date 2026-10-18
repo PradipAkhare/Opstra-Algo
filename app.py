@@ -300,46 +300,45 @@ else:
 
 # Multiply base margin estimate by lots
 est_margin = (lot_size/25) * est_margin
-
 # ==========================================
 # 6. MAIN DASHBOARD LOGIC 
 # ==========================================
 leg_data = []
 all_tokens_found = True
 
-if len(legs_config) > 0:
-    for l_type, l_side, l_off in legs_config:
-        l_strike = target_strike + l_off
-        tok, sym = get_token_info("NIFTY", l_strike, l_type, target_expiry)
-        if tok:
-            leg_data.append({"type": l_type, "side": l_side, "strike": l_strike, "token": tok, "symbol": sym, "active": True})
-        else:
-            all_tokens_found = False
+for l_type, l_side, l_off in legs_config:
+    l_strike = target_strike + l_off
+    tok, sym = get_token_info("NIFTY", l_strike, l_type, target_expiry)
+    if tok:
+        leg_data.append({"type": l_type, "side": l_side, "strike": l_strike, "token": tok, "symbol": sym, "active": True})
+    else:
+        all_tokens_found = False
 
-    if all_tokens_found:
+if all_tokens_found:
+    
+    # --- PART 1: PRE-TRADE ANALYSIS ---
+    for leg in leg_data:
+        leg["entry"] = smartApi.ltpData("NFO", leg["symbol"], leg["token"])['data']['ltp']
+        leg["sl"], leg["tgt"] = get_exit_prices(leg["entry"], leg["side"], leg_sl_percent, leg_target_percent)
         
-        # --- PART 1: PRE-TRADE ANALYSIS ---
+    current_spot = target_strike 
+    prices = list(range(int(target_strike) - 4000, int(target_strike) + 4000, 10))
+    pnl_expiry = []
+    pnl_t0 = []
+    
+    for p in prices:
+        exp_val = 0
+        t0_val = 0
         for leg in leg_data:
-            leg["entry"] = smartApi.ltpData("NFO", leg["symbol"], leg["token"])['data']['ltp']
-            leg["sl"], leg["tgt"] = get_exit_prices(leg["entry"], leg["side"], leg_sl_percent, leg_target_percent)
-            
-        current_spot = target_strike 
-        prices = list(range(int(target_strike) - 4000, int(target_strike) + 4000, 10))
-        pnl_expiry = []
-        pnl_t0 = []
+            exp_val += calc_leg_pnl(p, leg["strike"], leg["entry"], leg["type"], leg["side"], 0, False)
+            t0_val += calc_leg_pnl(p, leg["strike"], leg["entry"], leg["type"], leg["side"], days_to_expiry, True)
+        pnl_expiry.append(exp_val * lot_size)
+        pnl_t0.append(t0_val * lot_size)
         
-        for p in prices:
-            exp_val = 0
-            t0_val = 0
-            for leg in leg_data:
-                exp_val += calc_leg_pnl(p, leg["strike"], leg["entry"], leg["type"], leg["side"], 0, False)
-                t0_val += calc_leg_pnl(p, leg["strike"], leg["entry"], leg["type"], leg["side"], days_to_expiry, True)
-            pnl_expiry.append(exp_val * lot_size)
-            pnl_t0.append(t0_val * lot_size)
-            
-        st.markdown("---")
-        st.subheader(f"📊 Pre-Trade Analysis: Selected Strategy")
-        
+    st.markdown("---")
+    st.subheader(f"📊 Pre-Trade Analysis: Selected Strategy")
+    
+    if len(leg_data) > 0:
         max_p = max(pnl_expiry)
         max_l = min(pnl_expiry)
         
@@ -350,27 +349,35 @@ if len(legs_config) > 0:
         max_loss_str = "Unlimited ⚠️" if (right_diff < -1 or left_diff < -1) else f"₹ {round(max_l, 2)}"
         
         pop_value = calculate_dynamic_pop(prices, pnl_t0, current_spot, days_to_expiry)
-        
-        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-        m_col1.metric("Est. Margin Required", f"₹ {est_margin:,.0f}")
-        m_col2.metric("Max Profit (At Expiry)", max_profit_str)
-        m_col3.metric("Max Loss (At Expiry)", max_loss_str)
-        m_col4.metric("Probability of Profit (POP)", f"{pop_value} %")
-        
-        fig = go.Figure()
-        pnl_profit = [p if p >= 0 else 0 for p in pnl_expiry]
-        pnl_loss = [p if p < 0 else 0 for p in pnl_expiry]
-        fig.add_trace(go.Scatter(x=prices, y=pnl_profit, mode='none', fill='tozeroy', fillcolor='rgba(0, 128, 0, 0.3)', showlegend=False))
-        fig.add_trace(go.Scatter(x=prices, y=pnl_loss, mode='none', fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.3)', showlegend=False))
-        fig.add_trace(go.Scatter(x=prices, y=pnl_expiry, mode='lines', name='Expiry Payoff', line=dict(color='blue', dash='dash')))
-        fig.add_trace(go.Scatter(x=prices, y=pnl_t0, mode='lines', name='T+0 Payoff (Today)', line=dict(color='darkorange', width=3)))
-        fig.update_layout(hovermode="x unified", xaxis_title="Nifty Price", yaxis_title="P&L (₹)", title="Payoff Graph")
-        fig.add_vline(x=target_strike, line_dash="dot", line_color="red", annotation_text="Strike")
-        fig.add_hline(y=0, line_color="black")
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # --- PART 2: LIVE ALGO EXECUTION ---
-        if start_algo:
+    else:
+        max_profit_str = "₹ 0"
+        max_loss_str = "₹ 0"
+        pop_value = 0.0
+        st.info("👆 Upar Option Chain mein se koi leg select karein (Buy/Sell check box pe tick mark karein) taaki Payoff Graph ban sake!")
+    
+    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+    m_col1.metric("Est. Margin Required", f"₹ {est_margin:,.0f}")
+    m_col2.metric("Max Profit (At Expiry)", max_profit_str)
+    m_col3.metric("Max Loss (At Expiry)", max_loss_str)
+    m_col4.metric("Probability of Profit (POP)", f"{pop_value} %")
+    
+    fig = go.Figure()
+    pnl_profit = [p if p >= 0 else 0 for p in pnl_expiry]
+    pnl_loss = [p if p < 0 else 0 for p in pnl_expiry]
+    fig.add_trace(go.Scatter(x=prices, y=pnl_profit, mode='none', fill='tozeroy', fillcolor='rgba(0, 128, 0, 0.3)', showlegend=False))
+    fig.add_trace(go.Scatter(x=prices, y=pnl_loss, mode='none', fill='tozeroy', fillcolor='rgba(255, 0, 0, 0.3)', showlegend=False))
+    fig.add_trace(go.Scatter(x=prices, y=pnl_expiry, mode='lines', name='Expiry Payoff', line=dict(color='blue', dash='dash')))
+    fig.add_trace(go.Scatter(x=prices, y=pnl_t0, mode='lines', name='T+0 Payoff (Today)', line=dict(color='darkorange', width=3)))
+    fig.update_layout(hovermode="x unified", xaxis_title="Nifty Price", yaxis_title="P&L (₹)", title="Payoff Graph")
+    fig.add_vline(x=target_strike, line_dash="dot", line_color="red", annotation_text="Strike")
+    fig.add_hline(y=0, line_color="black")
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # --- PART 2: LIVE ALGO EXECUTION ---
+    if start_algo:
+        if len(leg_data) == 0:
+            st.error("⚠️ Pehle Option Chain se koi leg select karein, uske baad Algo Start karein!")
+        else:
             st.success("✅ Algo Started & Orders Placed Successfully!")
             st.markdown("---")
             st.subheader("⚡ Live MTM & Strategy Greeks")
@@ -490,8 +497,6 @@ if len(legs_config) > 0:
                     
                 time.sleep(1)
                 
-    else:
-        st.warning("⚠️ Koi ek Token nahi mila. Kripya Expiry Date check karein (Jaise: 29DEC2026) ya Strike badlein.")
 else:
-    if "Option Chain" in strategy:
-        st.info("👆 Option Chain mein se koi leg select karein (Buy/Sell check box pe tick mark karein) taaki Payoff Graph dikh sake!")
+    st.warning("⚠️ Koi ek Token nahi mila. Kripya Expiry Date check karein (Jaise: 29DEC2026) ya Strike badlein.")
+
